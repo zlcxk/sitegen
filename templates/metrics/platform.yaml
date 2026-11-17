@@ -7,8 +7,8 @@ profiles:
     auto: true
     panels:
       - id: app-up
-        name: 应用抓取健康
-        description: 使用 up 指标按 Prometheus job 展示站点关联应用的抓取状态；不伪造业务健康分。
+        name: 应用指标采集状态
+        description: 使用 up 指标按 Prometheus job 展示站点关联应用的采集状态。up=1 仅表示 Prometheus 成功抓取目标，不代表应用业务健康。
         query: |
           min by (job) (up{%SELECTOR%})
         unit: none

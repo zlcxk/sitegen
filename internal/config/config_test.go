@@ -176,6 +176,90 @@ func TestLinksValidation(t *testing.T) {
 	}
 }
 
+func TestValidationRejectsUnknownEntryApplication(t *testing.T) {
+	site, reg := loadExample(t)
+	site.Spec.Domains[0].EntryApplications = []string{"missing-app"}
+	issues := config.Validate(site, reg.Resolve)
+	if !issues.HasErrors() {
+		t.Fatal("expected unknown entry application error")
+	}
+	if !strings.Contains(strings.Join(issues.ErrorStrings(), "\n"), "entryApplications") {
+		t.Fatal("expected entryApplications path in error")
+	}
+}
+
+func TestValidationAllowsMultipleEntryAppsAndSharedEntryApp(t *testing.T) {
+	site, reg := loadExample(t)
+	site.Spec.Domains = append(site.Spec.Domains, config.Domain{
+		ID:                "api",
+		URL:               "https://api.example.com",
+		Blackbox:          config.Blackbox{Job: "blackbox", Instance: "https://api.example.com"},
+		EntryApplications: []string{"rtd-admin-test", "user-center-test"},
+	})
+	site.Spec.Domains[0].EntryApplications = []string{"rtd-admin-test", "user-center-test"}
+	if issues := config.Validate(site, reg.Resolve); issues.HasErrors() {
+		t.Fatalf("unexpected errors: %v", issues.ErrorStrings())
+	}
+	if ids := site.EntryApplicationIDs(); len(ids) != 2 {
+		t.Fatalf("entry applications must be de-duplicated: %#v", ids)
+	}
+	if apps := site.EntryApplicationsWithMetric("http"); len(apps) != 1 || apps[0].ID != "rtd-admin-test" {
+		t.Fatalf("only HTTP-enabled entry apps belong to the site HTTP aggregate: %#v", apps)
+	}
+}
+
+func TestValidationWarnsWhenHTTPHasNoEntryApplications(t *testing.T) {
+	site, reg := loadExample(t)
+	for i := range site.Spec.Domains {
+		site.Spec.Domains[i].EntryApplications = nil
+	}
+	issues := config.Validate(site, reg.Resolve)
+	if issues.HasErrors() {
+		t.Fatalf("unexpected errors: %v", issues.ErrorStrings())
+	}
+	if !strings.Contains(strings.Join(issues.ErrorStrings(), "\n"), "entryApplications") {
+		t.Fatal("expected explicit warning about missing entry applications")
+	}
+}
+
+func TestValidationRejectsInvalidPodSelector(t *testing.T) {
+	site, reg := loadExample(t)
+	site.Spec.Applications[0].Kubernetes.PodSelector = &config.PodSelector{Mode: "labels"}
+	issues := config.Validate(site, reg.Resolve)
+	if !issues.HasErrors() {
+		t.Fatal("expected labels mode without matchers to fail")
+	}
+	site.Spec.Applications[0].Kubernetes.PodSelector = &config.PodSelector{Mode: "pod-regex", Pod: "(["}
+	if issues := config.Validate(site, reg.Resolve); !issues.HasErrors() {
+		t.Fatal("expected invalid pod regex to fail")
+	}
+}
+
+func TestValidationWarnsWhenPodSelectorMissing(t *testing.T) {
+	site, reg := loadExample(t)
+	site.Spec.Applications[0].Kubernetes.PodSelector = nil
+	issues := config.Validate(site, reg.Resolve)
+	if issues.HasErrors() {
+		t.Fatalf("unexpected errors: %v", issues.ErrorStrings())
+	}
+	if !strings.Contains(strings.Join(issues.ErrorStrings(), "\n"), "podSelector") {
+		t.Fatal("expected warning about missing podSelector")
+	}
+}
+
+func TestValidationRejectsReservedSitegenLabel(t *testing.T) {
+	site, reg := loadExample(t)
+	site.Spec.Applications[0].Prometheus.Labels[config.SitegenAppLabel] = "x"
+	site.Spec.Applications[1].Prometheus.Labels[config.SitegenAppLabel] = "x"
+	issues := config.Validate(site, reg.Resolve)
+	if !issues.HasErrors() {
+		t.Fatal("expected reserved label error")
+	}
+	if !strings.Contains(strings.Join(issues.ErrorStrings(), "\n"), "sitegen_app") {
+		t.Fatal("expected sitegen_app reserved label message")
+	}
+}
+
 func TestExampleToolConfig(t *testing.T) {
 	cfg, path, err := config.LoadToolConfig("../../sitegen.example.yaml")
 	if err != nil {

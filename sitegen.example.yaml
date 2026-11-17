@@ -15,6 +15,7 @@ links:
   grafana: "http://grafana.example.com"
 
   # 可选。支持 {service}、{application}、{namespace}、{site} 占位符。
+  # 模板只做语法校验；必须在目标 SkyWalking UI 版本中实际打开验证后才可用于下钻。
   skywalkingServiceURLTemplate: "http://skywalking-ui.example.com/service?service={service}"
   skywalkingEndpointURLTemplate: "http://skywalking-ui.example.com/endpoint?service={service}"
 

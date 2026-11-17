@@ -30,10 +30,10 @@ var SectionOrder = []string{
 var SectionTitle = map[string]string{
 	SectionOverview:    "站点健康总览",
 	SectionHTTP:        "HTTP 请求分析",
-	SectionRuntime:     "应用运行情况",
+	SectionRuntime:     "应用与 JVM",
 	SectionService:     "服务调用关系",
 	SectionComponent:   "依赖组件",
-	SectionEnvironment: "运行环境",
+	SectionEnvironment: "Kubernetes 运行环境",
 }
 
 // Scope determines how %SELECTOR% is rendered.
@@ -56,6 +56,17 @@ type Profile struct {
 	Panels         []Panel  `yaml:"panels"`
 }
 
+// Panel aggregation scopes.
+const (
+	// AggregationApplication renders a query for the currently selected
+	// application (or the exact application under validation).
+	AggregationApplication = "application"
+	// AggregationSite aggregates only configured entry applications. It must
+	// never aggregate all applications, because that double counts internal
+	// service calls as external site traffic.
+	AggregationSite = "site"
+)
+
 // Panel describes one Grafana panel and its PromQL template.
 type Panel struct {
 	ID              string      `yaml:"id"`
@@ -66,6 +77,7 @@ type Panel struct {
 	Panel           string      `yaml:"panel"`
 	LegendFormat    string      `yaml:"legendFormat,omitempty"`
 	Sections        []string    `yaml:"sections"`
+	Aggregation     string      `yaml:"aggregation,omitempty"`
 	Instant         bool        `yaml:"instant,omitempty"`
 	Thresholds      []Threshold `yaml:"thresholds,omitempty"`
 	RequiredMetrics []string    `yaml:"requiredMetrics"`
@@ -94,11 +106,8 @@ var (
 )
 
 var allowedVars = map[string]bool{
-	"application":     true,
-	"namespace":       true,
-	"pod":             true,
-	"app_jobs":        true,
-	"site_namespaces": true,
+	"pod":          true,
+	"app_selector": true,
 }
 
 var allowedPanelTypes = map[string]bool{

@@ -39,7 +39,7 @@
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "Blackbox 探测成功率（最近 5 分钟平均值）。",
+      "description": "Blackbox 探测成功率（最近 5 分钟平均值）。只代表域名探测结果，不能据此断言后端应用一定异常。",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -106,65 +106,38 @@
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "Blackbox 探测总耗时，来自 probe_duration_seconds。",
+      "description": "Blackbox 探测总耗时，统一转换为毫秒，便于与后端响应时间对比。",
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "palette-classic"
+            "mode": "thresholds"
           },
-          "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "unit": "s"
+          "unit": "ms"
         },
         "overrides": []
       },
       "gridPos": {
-        "h": 6,
-        "w": 8,
+        "h": 5,
+        "w": 6,
         "x": 6,
         "y": 1
       },
       "id": 3,
       "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
         },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
       },
       "targets": [
         {
@@ -173,79 +146,52 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "avg(probe_duration_seconds{job=\"blackbox-sites\", instance=\"https://admin-test.rtdgo.tech\"})\n",
-          "legendFormat": "{{instance}}",
-          "range": true,
+          "expr": "1000 * avg(probe_duration_seconds{job=\"blackbox-sites\", instance=\"https://admin-test.rtdgo.tech\"})\n",
+          "instant": true,
+          "range": false,
           "refId": "A"
         }
       ],
       "title": "admin / 外部探测耗时",
-      "type": "timeseries"
+      "type": "stat"
     },
     {
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "按站点所选应用和 Namespace 聚合的每秒请求数，使用 5 分钟速率。",
+      "description": "仅统计域名 entryApplications 显式声明的入口应用；下游应用的内部调用不会重复计入站点外部请求量。",
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
+            "mode": "thresholds"
           },
           "unit": "reqps"
         },
         "overrides": []
       },
       "gridPos": {
-        "h": 6,
-        "w": 8,
-        "x": 14,
+        "h": 5,
+        "w": 6,
+        "x": 12,
         "y": 1
       },
       "id": 4,
       "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
         },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
       },
       "targets": [
         {
@@ -254,56 +200,25 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "sum(rate(http_server_requests_seconds_count{application=~\"$application\", application=~\"rtd-admin|user-center-application\", namespace=~\"$namespace\", namespace=~\"test\", job=~\"rtd-admin|user-center-application\"}[5m]))\n",
-          "legendFormat": "RPS",
-          "range": true,
+          "expr": "sum(rate(http_server_requests_seconds_count{application=\"rtd-admin\", namespace=\"test\", job=\"rtd-admin\"}[5m]))\n",
+          "instant": true,
+          "range": false,
           "refId": "A"
         }
       ],
-      "title": "HTTP RPS",
-      "type": "timeseries"
+      "title": "入口应用请求量",
+      "type": "stat"
     },
     {
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "非 5xx 请求占比。4xx 保持计入成功率，与 PRD 的 5xx 错误口径一致。",
+      "description": "2xx 状态码请求占入口应用全部请求的比例；只反映 HTTP 响应状态，不代表业务操作成功。",
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "line+area"
-            }
+            "mode": "thresholds"
           },
           "thresholds": {
             "mode": "absolute",
@@ -327,23 +242,27 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 6,
-        "w": 8,
-        "x": 0,
-        "y": 7
+        "h": 5,
+        "w": 6,
+        "x": 18,
+        "y": 1
       },
       "id": 5,
       "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
         },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
       },
       "targets": [
         {
@@ -352,79 +271,52 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "1 - (\n  sum(rate(http_server_requests_seconds_count{application=~\"$application\", application=~\"rtd-admin|user-center-application\", namespace=~\"$namespace\", namespace=~\"test\", job=~\"rtd-admin|user-center-application\", status=~\"5..\"}[5m]))\n  /\n  clamp_min(sum(rate(http_server_requests_seconds_count{application=~\"$application\", application=~\"rtd-admin|user-center-application\", namespace=~\"$namespace\", namespace=~\"test\", job=~\"rtd-admin|user-center-application\"}[5m])), 1e-9)\n)\n",
-          "legendFormat": "成功率",
-          "range": true,
+          "expr": "sum(rate(http_server_requests_seconds_count{application=\"rtd-admin\", namespace=\"test\", job=\"rtd-admin\", status=~\"2..\"}[5m]))\n/\nclamp_min(sum(rate(http_server_requests_seconds_count{application=\"rtd-admin\", namespace=\"test\", job=\"rtd-admin\"}[5m])), 1e-9)\n",
+          "instant": true,
+          "range": false,
           "refId": "A"
         }
       ],
-      "title": "HTTP 成功率",
-      "type": "timeseries"
+      "title": "入口应用 2xx 比例",
+      "type": "stat"
     },
     {
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "由 http_server_requests_seconds_bucket 计算的全站 P95 延迟。",
+      "description": "入口应用 HTTP 请求的 P95 延迟，单位毫秒。",
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "palette-classic"
+            "mode": "thresholds"
           },
-          "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "unit": "s"
+          "unit": "ms"
         },
         "overrides": []
       },
       "gridPos": {
-        "h": 6,
-        "w": 8,
-        "x": 8,
-        "y": 7
+        "h": 5,
+        "w": 6,
+        "x": 0,
+        "y": 6
       },
       "id": 6,
       "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
         },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
       },
       "targets": [
         {
@@ -433,21 +325,21 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(\n  0.95,\n  sum by (le) (\n    rate(http_server_requests_seconds_bucket{application=~\"$application\", application=~\"rtd-admin|user-center-application\", namespace=~\"$namespace\", namespace=~\"test\", job=~\"rtd-admin|user-center-application\"}[5m])\n  )\n)\n",
-          "legendFormat": "P95",
-          "range": true,
+          "expr": "1000 * histogram_quantile(\n  0.95,\n  sum by (le) (\n    rate(http_server_requests_seconds_bucket{application=\"rtd-admin\", namespace=\"test\", job=\"rtd-admin\"}[5m])\n  )\n)\n",
+          "instant": true,
+          "range": false,
           "refId": "A"
         }
       ],
-      "title": "HTTP P95 延迟",
-      "type": "timeseries"
+      "title": "入口应用 P95 延迟",
+      "type": "stat"
     },
     {
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "使用 up 指标按 Prometheus job 展示站点关联应用的抓取状态；不伪造业务健康分。",
+      "description": "5xx 服务端错误占入口应用全部请求的比例。",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -457,24 +349,28 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "red",
+                "color": "green",
                 "value": null
               },
               {
-                "color": "green",
-                "value": 1
+                "color": "yellow",
+                "value": 0.01
+              },
+              {
+                "color": "red",
+                "value": 0.05
               }
             ]
           },
-          "unit": "none"
+          "unit": "percentunit"
         },
         "overrides": []
       },
       "gridPos": {
         "h": 5,
         "w": 6,
-        "x": 16,
-        "y": 7
+        "x": 6,
+        "y": 6
       },
       "id": 7,
       "options": {
@@ -500,13 +396,13 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "min by (job) (up{job=~\"rtd-admin|user-center-application\"})\n",
+          "expr": "sum(rate(http_server_requests_seconds_count{application=\"rtd-admin\", namespace=\"test\", job=\"rtd-admin\", status=~\"5..\"}[5m]))\n/\nclamp_min(sum(rate(http_server_requests_seconds_count{application=\"rtd-admin\", namespace=\"test\", job=\"rtd-admin\"}[5m])), 1e-9)\n",
           "instant": true,
           "range": false,
           "refId": "A"
         }
       ],
-      "title": "应用抓取健康",
+      "title": "入口应用 5xx 比例",
       "type": "stat"
     },
     {
@@ -514,7 +410,7 @@
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "仅使用已确认的 mysql_up。连接数、慢查询等性能指标需在目标 Prometheus 确认后才能加入模板。",
+      "description": "使用 up 指标按 Prometheus job 展示站点关联应用的采集状态。up=1 仅表示 Prometheus 成功抓取目标，不代表应用业务健康。",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -540,8 +436,8 @@
       "gridPos": {
         "h": 5,
         "w": 6,
-        "x": 0,
-        "y": 13
+        "x": 12,
+        "y": 6
       },
       "id": 8,
       "options": {
@@ -567,13 +463,13 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "max(mysql_up{job=\"scrapeConfig/monitoring/mysql-exporter-test\", instance=\"10.10.100.10:3307\"})\n",
+          "expr": "min by (job) (((up{job=\"rtd-admin\"} or up{job=\"user-center-application\"})))\n",
           "instant": true,
           "range": false,
           "refId": "A"
         }
       ],
-      "title": "MySQL Test / MySQL 状态",
+      "title": "应用指标采集状态",
       "type": "stat"
     },
     {
@@ -581,7 +477,7 @@
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "仅使用已确认的 redis_up。内存、命中率、连接数等指标需在目标 Prometheus 确认后再加入模板。",
+      "description": "mysql_up=1 表示 exporter 对 MySQL 的连接检查成功，不代表 SQL 性能或业务健康；连接数、慢查询等指标需在目标 Prometheus 确认后再加入模板。",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -607,1587 +503,10 @@
       "gridPos": {
         "h": 5,
         "w": 6,
-        "x": 6,
-        "y": 13
+        "x": 18,
+        "y": 6
       },
       "id": 9,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "showPercentChange": false,
-        "textMode": "auto",
-        "wideLayout": true
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "editorMode": "code",
-          "expr": "max(redis_up{job=\"scrapeConfig/monitoring/redis-exporter\", instance=\"redis://10.10.100.10:26379\"})\n",
-          "instant": true,
-          "range": false,
-          "refId": "A"
-        }
-      ],
-      "title": "Redis Test / Redis 状态",
-      "type": "stat"
-    },
-    {
-      "collapsed": false,
-      "gridPos": {
-        "h": 1,
-        "w": 24,
-        "x": 0,
-        "y": 18
-      },
-      "id": 10,
-      "panels": [],
-      "title": "HTTP 请求分析",
-      "type": "row"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "description": "按站点所选应用和 Namespace 聚合的每秒请求数，使用 5 分钟速率。",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "unit": "reqps"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 19
-      },
-      "id": 11,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "editorMode": "code",
-          "expr": "sum(rate(http_server_requests_seconds_count{application=~\"$application\", application=~\"rtd-admin|user-center-application\", namespace=~\"$namespace\", namespace=~\"test\", job=~\"rtd-admin|user-center-application\"}[5m]))\n",
-          "legendFormat": "RPS",
-          "range": true,
-          "refId": "A"
-        }
-      ],
-      "title": "HTTP RPS",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "description": "非 5xx 请求占比。4xx 保持计入成功率，与 PRD 的 5xx 错误口径一致。",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "line+area"
-            }
-          },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "red",
-                "value": null
-              },
-              {
-                "color": "yellow",
-                "value": 0.95
-              },
-              {
-                "color": "green",
-                "value": 0.99
-              }
-            ]
-          },
-          "unit": "percentunit"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 19
-      },
-      "id": 12,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "editorMode": "code",
-          "expr": "1 - (\n  sum(rate(http_server_requests_seconds_count{application=~\"$application\", application=~\"rtd-admin|user-center-application\", namespace=~\"$namespace\", namespace=~\"test\", job=~\"rtd-admin|user-center-application\", status=~\"5..\"}[5m]))\n  /\n  clamp_min(sum(rate(http_server_requests_seconds_count{application=~\"$application\", application=~\"rtd-admin|user-center-application\", namespace=~\"$namespace\", namespace=~\"test\", job=~\"rtd-admin|user-center-application\"}[5m])), 1e-9)\n)\n",
-          "legendFormat": "成功率",
-          "range": true,
-          "refId": "A"
-        }
-      ],
-      "title": "HTTP 成功率",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "description": "由 http_server_requests_seconds_bucket 计算的全站 P95 延迟。",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "unit": "s"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 27
-      },
-      "id": 13,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "editorMode": "code",
-          "expr": "histogram_quantile(\n  0.95,\n  sum by (le) (\n    rate(http_server_requests_seconds_bucket{application=~\"$application\", application=~\"rtd-admin|user-center-application\", namespace=~\"$namespace\", namespace=~\"test\", job=~\"rtd-admin|user-center-application\"}[5m])\n  )\n)\n",
-          "legendFormat": "P95",
-          "range": true,
-          "refId": "A"
-        }
-      ],
-      "title": "HTTP P95 延迟",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "description": "OPTIONS 请求默认单独成组展示，不混入业务请求的图例。",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "unit": "reqps"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 27
-      },
-      "id": 14,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "editorMode": "code",
-          "expr": "sum by (method) (\n  rate(http_server_requests_seconds_count{application=~\"$application\", application=~\"rtd-admin|user-center-application\", namespace=~\"$namespace\", namespace=~\"test\", job=~\"rtd-admin|user-center-application\"}[5m])\n)\n",
-          "legendFormat": "{{method}}",
-          "range": true,
-          "refId": "A"
-        }
-      ],
-      "title": "按 Method 的 RPS",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "description": "Sum / Count，单位秒。",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "unit": "s"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 35
-      },
-      "id": 15,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "editorMode": "code",
-          "expr": "sum(rate(http_server_requests_seconds_sum{application=~\"$application\", application=~\"rtd-admin|user-center-application\", namespace=~\"$namespace\", namespace=~\"test\", job=~\"rtd-admin|user-center-application\"}[5m]))\n/\nclamp_min(sum(rate(http_server_requests_seconds_count{application=~\"$application\", application=~\"rtd-admin|user-center-application\", namespace=~\"$namespace\", namespace=~\"test\", job=~\"rtd-admin|user-center-application\"}[5m])), 1e-9)\n",
-          "legendFormat": "平均",
-          "range": true,
-          "refId": "A"
-        }
-      ],
-      "title": "平均响应时间",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "description": "由 histogram bucket 计算，受直方图桶边界影响。",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "unit": "s"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 35
-      },
-      "id": 16,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "editorMode": "code",
-          "expr": "histogram_quantile(\n  0.99,\n  sum by (le) (\n    rate(http_server_requests_seconds_bucket{application=~\"$application\", application=~\"rtd-admin|user-center-application\", namespace=~\"$namespace\", namespace=~\"test\", job=~\"rtd-admin|user-center-application\"}[5m])\n  )\n)\n",
-          "legendFormat": "P99",
-          "range": true,
-          "refId": "A"
-        }
-      ],
-      "title": "HTTP P99 延迟",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "description": "按 status 标签展示请求速率分布。",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "unit": "reqps"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 43
-      },
-      "id": 17,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "editorMode": "code",
-          "expr": "sum by (status) (\n  rate(http_server_requests_seconds_count{application=~\"$application\", application=~\"rtd-admin|user-center-application\", namespace=~\"$namespace\", namespace=~\"test\", job=~\"rtd-admin|user-center-application\"}[5m])\n)\n",
-          "legendFormat": "{{status}}",
-          "range": true,
-          "refId": "A"
-        }
-      ],
-      "title": "HTTP 状态码分布",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "description": "5xx 请求占全部请求的比例；无流量时未做 0 值伪造。",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "line+area"
-            }
-          },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "yellow",
-                "value": 0.01
-              },
-              {
-                "color": "red",
-                "value": 0.05
-              }
-            ]
-          },
-          "unit": "percentunit"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 43
-      },
-      "id": 18,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "editorMode": "code",
-          "expr": "sum(rate(http_server_requests_seconds_count{application=~\"$application\", application=~\"rtd-admin|user-center-application\", namespace=~\"$namespace\", namespace=~\"test\", job=~\"rtd-admin|user-center-application\", status=~\"5..\"}[5m]))\n/\nclamp_min(sum(rate(http_server_requests_seconds_count{application=~\"$application\", application=~\"rtd-admin|user-center-application\", namespace=~\"$namespace\", namespace=~\"test\", job=~\"rtd-admin|user-center-application\"}[5m])), 1e-9)\n",
-          "legendFormat": "5xx",
-          "range": true,
-          "refId": "A"
-        }
-      ],
-      "title": "5xx 错误率",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "description": "按 method + uri 计算 P95；仅保留 5 分钟内平均请求速率高于 1/60 reqps 的接口，避免低流量接口产生误导性 P95。OPTIONS 已排除。",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "custom": {
-            "align": "auto",
-            "cellOptions": {
-              "type": "auto"
-            },
-            "inspect": false
-          },
-          "unit": "s"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 51
-      },
-      "id": 19,
-      "options": {
-        "cellHeight": "sm",
-        "footer": {
-          "countRows": false,
-          "fields": "",
-          "reducer": "sum",
-          "show": false
-        },
-        "showHeader": true
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "editorMode": "code",
-          "expr": "topk(10,\n  histogram_quantile(\n    0.95,\n    sum by (le, method, uri) (\n      rate(http_server_requests_seconds_bucket{application=~\"$application\", application=~\"rtd-admin|user-center-application\", namespace=~\"$namespace\", namespace=~\"test\", job=~\"rtd-admin|user-center-application\", method!=\"OPTIONS\"}[5m])\n    )\n  )\n  and on (method, uri)\n  sum by (method, uri) (\n    rate(http_server_requests_seconds_count{application=~\"$application\", application=~\"rtd-admin|user-center-application\", namespace=~\"$namespace\", namespace=~\"test\", job=~\"rtd-admin|user-center-application\", method!=\"OPTIONS\"}[5m])\n  ) > 0.0166666667\n)\n",
-          "format": "table",
-          "instant": true,
-          "range": false,
-          "refId": "A"
-        }
-      ],
-      "title": "慢接口 Top 10",
-      "type": "table"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "description": "按 method + uri 汇总请求速率 Top 10；OPTIONS 已排除。",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "custom": {
-            "align": "auto",
-            "cellOptions": {
-              "type": "auto"
-            },
-            "inspect": false
-          },
-          "unit": "reqps"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 51
-      },
-      "id": 20,
-      "options": {
-        "cellHeight": "sm",
-        "footer": {
-          "countRows": false,
-          "fields": "",
-          "reducer": "sum",
-          "show": false
-        },
-        "showHeader": true
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "editorMode": "code",
-          "expr": "topk(10,\n  sum by (method, uri) (\n    rate(http_server_requests_seconds_count{application=~\"$application\", application=~\"rtd-admin|user-center-application\", namespace=~\"$namespace\", namespace=~\"test\", job=~\"rtd-admin|user-center-application\", method!=\"OPTIONS\"}[5m])\n  )\n)\n",
-          "format": "table",
-          "instant": true,
-          "range": false,
-          "refId": "A"
-        }
-      ],
-      "title": "高请求量 Endpoint",
-      "type": "table"
-    },
-    {
-      "collapsed": false,
-      "gridPos": {
-        "h": 1,
-        "w": 24,
-        "x": 0,
-        "y": 59
-      },
-      "id": 21,
-      "panels": [],
-      "title": "应用运行情况",
-      "type": "row"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "description": "按站点所选应用和 Namespace 聚合的每秒请求数，使用 5 分钟速率。",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "unit": "reqps"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 60
-      },
-      "id": 22,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "editorMode": "code",
-          "expr": "sum(rate(http_server_requests_seconds_count{application=~\"$application\", application=~\"rtd-admin|user-center-application\", namespace=~\"$namespace\", namespace=~\"test\", job=~\"rtd-admin|user-center-application\"}[5m]))\n",
-          "legendFormat": "RPS",
-          "range": true,
-          "refId": "A"
-        }
-      ],
-      "title": "HTTP RPS",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "description": "Sum / Count，单位秒。",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "unit": "s"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 60
-      },
-      "id": 23,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "editorMode": "code",
-          "expr": "sum(rate(http_server_requests_seconds_sum{application=~\"$application\", application=~\"rtd-admin|user-center-application\", namespace=~\"$namespace\", namespace=~\"test\", job=~\"rtd-admin|user-center-application\"}[5m]))\n/\nclamp_min(sum(rate(http_server_requests_seconds_count{application=~\"$application\", application=~\"rtd-admin|user-center-application\", namespace=~\"$namespace\", namespace=~\"test\", job=~\"rtd-admin|user-center-application\"}[5m])), 1e-9)\n",
-          "legendFormat": "平均",
-          "range": true,
-          "refId": "A"
-        }
-      ],
-      "title": "平均响应时间",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "description": "仅使用已确认的 jvm_memory_used_bytes；按 pod 展示 heap 使用量。其他 JVM 指标需在真实 Prometheus 中确认后再加入模板。",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "unit": "bytes"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 68
-      },
-      "id": 24,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "editorMode": "code",
-          "expr": "sum by (pod) (\n  jvm_memory_used_bytes{application=~\"$application\", application=~\"rtd-admin|user-center-application\", namespace=~\"$namespace\", namespace=~\"test\", job=~\"rtd-admin|user-center-application\", area=\"heap\"}\n)\n",
-          "legendFormat": "{{pod}}",
-          "range": true,
-          "refId": "A"
-        }
-      ],
-      "title": "JVM Heap（按 Pod）",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "description": "jvm_memory_used_bytes 按 pod 和 id 展示 heap 内存池；用于观察池间分布。",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "unit": "bytes"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 68
-      },
-      "id": 25,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "editorMode": "code",
-          "expr": "sum by (pod, id) (\n  jvm_memory_used_bytes{application=~\"$application\", application=~\"rtd-admin|user-center-application\", namespace=~\"$namespace\", namespace=~\"test\", job=~\"rtd-admin|user-center-application\", area=\"heap\"}\n)\n",
-          "legendFormat": "{{pod}} / {{id}}",
-          "range": true,
-          "refId": "A"
-        }
-      ],
-      "title": "JVM Heap（按内存池）",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "description": "container_cpu_usage_seconds_total 按 Pod 聚合；排除 container 为空和 POD 基础容器序列。",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "unit": "none"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 76
-      },
-      "id": 26,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "editorMode": "code",
-          "expr": "sum by (pod) (\n  rate(container_cpu_usage_seconds_total{namespace=~\"$namespace\", namespace=~\"test\", pod=~\"$pod\", container!=\"\", container!=\"POD\"}[5m])\n)\n",
-          "legendFormat": "{{pod}}",
-          "range": true,
-          "refId": "A"
-        }
-      ],
-      "title": "Pod CPU",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "description": "container_memory_working_set_bytes 按 Pod 聚合；排除基础容器，不能与 JVM Heap 混为一谈。",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "unit": "bytes"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 76
-      },
-      "id": 27,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "editorMode": "code",
-          "expr": "sum by (pod) (\n  container_memory_working_set_bytes{namespace=~\"$namespace\", namespace=~\"test\", pod=~\"$pod\", container!=\"\", container!=\"POD\"}\n)\n",
-          "legendFormat": "{{pod}}",
-          "range": true,
-          "refId": "A"
-        }
-      ],
-      "title": "Pod 内存 Working Set",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "description": "被限流的 CFS 周期占比。使用 cAdvisor 标准指标，需通过 sitegen check 在目标 Prometheus 确认。",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "line+area"
-            }
-          },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "yellow",
-                "value": 0.1
-              },
-              {
-                "color": "red",
-                "value": 0.25
-              }
-            ]
-          },
-          "unit": "percentunit"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 84
-      },
-      "id": 28,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "editorMode": "code",
-          "expr": "sum by (pod) (\n  rate(container_cpu_cfs_throttled_periods_total{namespace=~\"$namespace\", namespace=~\"test\", pod=~\"$pod\", container!=\"\", container!=\"POD\"}[5m])\n)\n/\nclamp_min(\n  sum by (pod) (\n    rate(container_cpu_cfs_periods_total{namespace=~\"$namespace\", namespace=~\"test\", pod=~\"$pod\", container!=\"\", container!=\"POD\"}[5m])\n  ),\n  1e-9\n)\n",
-          "legendFormat": "{{pod}}",
-          "range": true,
-          "refId": "A"
-        }
-      ],
-      "title": "CPU Throttling",
-      "type": "timeseries"
-    },
-    {
-      "collapsed": false,
-      "gridPos": {
-        "h": 1,
-        "w": 24,
-        "x": 0,
-        "y": 92
-      },
-      "id": 29,
-      "panels": [],
-      "title": "服务调用关系",
-      "type": "row"
-    },
-    {
-      "gridPos": {
-        "h": 6,
-        "w": 12,
-        "x": 0,
-        "y": 93
-      },
-      "id": 30,
-      "options": {
-        "code": {
-          "language": "plaintext",
-          "showLineNumbers": false,
-          "showMiniMap": false
-        },
-        "content": "### SkyWalking 服务拓扑\n\n未配置 SkyWalking UI 地址。请在 `sitegen.yaml` 或站点 `spec.links.skywalking` 中配置。\n\nSkyWalking 拓扑不在本 Dashboard 中伪造；此处只提供页面入口与 YAML 声明的服务映射。\n\n**站点服务映射**\n\n- `rtd-admin` (test) → `rtd-admin_test`\n- `user-center-application` (test) → `user-center-application_test`\n\n**YAML 显式依赖（配置关系，非 SkyWalking 实测拓扑）**\n\n- `rtd-admin/test` → user-center-application/test, MySQL Test, Redis Test\n- `user-center-application/test` → MySQL Test, Redis Test",
-        "mode": "markdown"
-      },
-      "title": "SkyWalking 服务拓扑",
-      "type": "text"
-    },
-    {
-      "gridPos": {
-        "h": 6,
-        "w": 12,
-        "x": 12,
-        "y": 93
-      },
-      "id": 31,
-      "options": {
-        "code": {
-          "language": "plaintext",
-          "showLineNumbers": false,
-          "showMiniMap": false
-        },
-        "content": "### SkyWalking Endpoint 排行\n\n未配置 SkyWalking UI 地址。\n\nYAML 声明的 Endpoint 维度格式：`{method}:{uri}`",
-        "mode": "markdown"
-      },
-      "title": "SkyWalking Endpoint 排行",
-      "type": "text"
-    },
-    {
-      "gridPos": {
-        "h": 6,
-        "w": 12,
-        "x": 0,
-        "y": 99
-      },
-      "id": 32,
-      "options": {
-        "code": {
-          "language": "plaintext",
-          "showLineNumbers": false,
-          "showMiniMap": false
-        },
-        "content": "### SkyWalking 慢 Trace\n\n本版本不自动构造复杂 Trace URL；请从 SkyWalking 服务或 Endpoint 页面进入慢 Trace 查询。",
-        "mode": "markdown"
-      },
-      "title": "SkyWalking 慢 Trace",
-      "type": "text"
-    },
-    {
-      "gridPos": {
-        "h": 6,
-        "w": 12,
-        "x": 12,
-        "y": 99
-      },
-      "id": 33,
-      "options": {
-        "code": {
-          "language": "plaintext",
-          "showLineNumbers": false,
-          "showMiniMap": false
-        },
-        "content": "### SkyWalking 服务调用量与成功率\n\nSkyWalking 调用指标没有在本 Dashboard 中伪装成 Prometheus 数据；请使用 SkyWalking 服务拓扑和指标页面查看。",
-        "mode": "markdown"
-      },
-      "title": "SkyWalking 服务调用",
-      "type": "text"
-    },
-    {
-      "collapsed": false,
-      "gridPos": {
-        "h": 1,
-        "w": 24,
-        "x": 0,
-        "y": 105
-      },
-      "id": 34,
-      "panels": [],
-      "title": "依赖组件",
-      "type": "row"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "description": "仅使用已确认的 mysql_up。连接数、慢查询等性能指标需在目标 Prometheus 确认后才能加入模板。",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "red",
-                "value": null
-              },
-              {
-                "color": "green",
-                "value": 1
-              }
-            ]
-          },
-          "unit": "none"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 6,
-        "w": 8,
-        "x": 0,
-        "y": 106
-      },
-      "id": 35,
       "options": {
         "colorMode": "value",
         "graphMode": "area",
@@ -2217,7 +536,7 @@
           "refId": "A"
         }
       ],
-      "title": "MySQL Test / MySQL 状态",
+      "title": "MySQL Test / MySQL 连接状态",
       "type": "stat"
     },
     {
@@ -2225,7 +544,7 @@
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "仅使用已确认的 redis_up。内存、命中率、连接数等指标需在目标 Prometheus 确认后再加入模板。",
+      "description": "redis_up=1 表示 exporter 对 Redis 的连接检查成功，不代表业务健康；内存、命中率、连接数等指标需在目标 Prometheus 确认后再加入模板。",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -2249,12 +568,12 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 6,
-        "w": 8,
-        "x": 8,
-        "y": 106
+        "h": 5,
+        "w": 6,
+        "x": 0,
+        "y": 11
       },
-      "id": 36,
+      "id": 10,
       "options": {
         "colorMode": "value",
         "graphMode": "area",
@@ -2284,474 +603,1648 @@
           "refId": "A"
         }
       ],
-      "title": "Redis Test / Redis 状态",
+      "title": "Redis Test / Redis 连接状态",
       "type": "stat"
     },
     {
-      "collapsed": false,
+      "collapsed": true,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 112
+        "y": 16
       },
-      "id": 37,
-      "panels": [],
-      "title": "运行环境",
+      "id": 11,
+      "panels": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "当前所选应用实例的每秒请求数，使用 5 分钟速率。",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "insertNulls": false,
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "unit": "reqps"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 1
+          },
+          "id": 12,
+          "options": {
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum(rate(((label_replace(http_server_requests_seconds_count{application=\"rtd-admin\", namespace=\"test\", job=\"rtd-admin\"}, \"sitegen_app\", \"rtd-admin-test\", \"\", \"\")) * on (sitegen_app) group_left label_replace(vector(1), \"sitegen_app\", ${app_selector:json}, \"\", \"\"))[5m:]))\n",
+              "legendFormat": "RPS",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "请求量趋势",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "2xx 状态码请求占比。2xx 只代表 HTTP 层响应成功，不代表业务操作成功。",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "insertNulls": false,
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "line+area"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "red",
+                    "value": null
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 0.95
+                  },
+                  {
+                    "color": "green",
+                    "value": 0.99
+                  }
+                ]
+              },
+              "unit": "percentunit"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 1
+          },
+          "id": 13,
+          "options": {
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum(rate(((label_replace(http_server_requests_seconds_count{application=\"rtd-admin\", namespace=\"test\", job=\"rtd-admin\", status=~\"2..\"}, \"sitegen_app\", \"rtd-admin-test\", \"\", \"\")) * on (sitegen_app) group_left label_replace(vector(1), \"sitegen_app\", ${app_selector:json}, \"\", \"\"))[5m:]))\n/\nclamp_min(sum(rate(((label_replace(http_server_requests_seconds_count{application=\"rtd-admin\", namespace=\"test\", job=\"rtd-admin\"}, \"sitegen_app\", \"rtd-admin-test\", \"\", \"\")) * on (sitegen_app) group_left label_replace(vector(1), \"sitegen_app\", ${app_selector:json}, \"\", \"\"))[5m:])), 1e-9)\n",
+              "legendFormat": "2xx",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "HTTP 2xx 比例",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "3xx 状态码请求占比。",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "insertNulls": false,
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "unit": "percentunit"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 9
+          },
+          "id": 14,
+          "options": {
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum(rate(((label_replace(http_server_requests_seconds_count{application=\"rtd-admin\", namespace=\"test\", job=\"rtd-admin\", status=~\"3..\"}, \"sitegen_app\", \"rtd-admin-test\", \"\", \"\")) * on (sitegen_app) group_left label_replace(vector(1), \"sitegen_app\", ${app_selector:json}, \"\", \"\"))[5m:]))\n/\nclamp_min(sum(rate(((label_replace(http_server_requests_seconds_count{application=\"rtd-admin\", namespace=\"test\", job=\"rtd-admin\"}, \"sitegen_app\", \"rtd-admin-test\", \"\", \"\")) * on (sitegen_app) group_left label_replace(vector(1), \"sitegen_app\", ${app_selector:json}, \"\", \"\"))[5m:])), 1e-9)\n",
+              "legendFormat": "3xx",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "HTTP 3xx 比例",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "4xx 状态码请求占比，不包含在 2xx 成功口径中。",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "insertNulls": false,
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "unit": "percentunit"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 9
+          },
+          "id": 15,
+          "options": {
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum(rate(((label_replace(http_server_requests_seconds_count{application=\"rtd-admin\", namespace=\"test\", job=\"rtd-admin\", status=~\"4..\"}, \"sitegen_app\", \"rtd-admin-test\", \"\", \"\")) * on (sitegen_app) group_left label_replace(vector(1), \"sitegen_app\", ${app_selector:json}, \"\", \"\"))[5m:]))\n/\nclamp_min(sum(rate(((label_replace(http_server_requests_seconds_count{application=\"rtd-admin\", namespace=\"test\", job=\"rtd-admin\"}, \"sitegen_app\", \"rtd-admin-test\", \"\", \"\")) * on (sitegen_app) group_left label_replace(vector(1), \"sitegen_app\", ${app_selector:json}, \"\", \"\"))[5m:])), 1e-9)\n",
+              "legendFormat": "4xx",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "HTTP 4xx 比例",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "5xx 服务端错误占全部请求的比例；无流量时未做 0 值伪造。",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "insertNulls": false,
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "line+area"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 0.01
+                  },
+                  {
+                    "color": "red",
+                    "value": 0.05
+                  }
+                ]
+              },
+              "unit": "percentunit"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 17
+          },
+          "id": 16,
+          "options": {
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum(rate(((label_replace(http_server_requests_seconds_count{application=\"rtd-admin\", namespace=\"test\", job=\"rtd-admin\", status=~\"5..\"}, \"sitegen_app\", \"rtd-admin-test\", \"\", \"\")) * on (sitegen_app) group_left label_replace(vector(1), \"sitegen_app\", ${app_selector:json}, \"\", \"\"))[5m:]))\n/\nclamp_min(sum(rate(((label_replace(http_server_requests_seconds_count{application=\"rtd-admin\", namespace=\"test\", job=\"rtd-admin\"}, \"sitegen_app\", \"rtd-admin-test\", \"\", \"\")) * on (sitegen_app) group_left label_replace(vector(1), \"sitegen_app\", ${app_selector:json}, \"\", \"\"))[5m:])), 1e-9)\n",
+              "legendFormat": "5xx",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "HTTP 5xx 比例",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "Sum / Count，统一以毫秒展示。",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "insertNulls": false,
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "unit": "ms"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 17
+          },
+          "id": 17,
+          "options": {
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "1000 *\nsum(rate(((label_replace(http_server_requests_seconds_sum{application=\"rtd-admin\", namespace=\"test\", job=\"rtd-admin\"}, \"sitegen_app\", \"rtd-admin-test\", \"\", \"\")) * on (sitegen_app) group_left label_replace(vector(1), \"sitegen_app\", ${app_selector:json}, \"\", \"\"))[5m:]))\n/\nclamp_min(sum(rate(((label_replace(http_server_requests_seconds_count{application=\"rtd-admin\", namespace=\"test\", job=\"rtd-admin\"}, \"sitegen_app\", \"rtd-admin-test\", \"\", \"\")) * on (sitegen_app) group_left label_replace(vector(1), \"sitegen_app\", ${app_selector:json}, \"\", \"\"))[5m:])), 1e-9)\n",
+              "legendFormat": "平均",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "平均响应时间",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "由 http_server_requests_seconds_bucket 计算，单位毫秒。",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "insertNulls": false,
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "unit": "ms"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 25
+          },
+          "id": 18,
+          "options": {
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "1000 * histogram_quantile(\n  0.95,\n  sum by (le) (\n    rate(((label_replace(http_server_requests_seconds_bucket{application=\"rtd-admin\", namespace=\"test\", job=\"rtd-admin\"}, \"sitegen_app\", \"rtd-admin-test\", \"\", \"\")) * on (sitegen_app) group_left label_replace(vector(1), \"sitegen_app\", ${app_selector:json}, \"\", \"\"))[5m:])\n  )\n)\n",
+              "legendFormat": "P95",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "HTTP P95 延迟",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "由 histogram bucket 计算，单位毫秒；受直方图桶边界影响。",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "insertNulls": false,
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "unit": "ms"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 25
+          },
+          "id": 19,
+          "options": {
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "1000 * histogram_quantile(\n  0.99,\n  sum by (le) (\n    rate(((label_replace(http_server_requests_seconds_bucket{application=\"rtd-admin\", namespace=\"test\", job=\"rtd-admin\"}, \"sitegen_app\", \"rtd-admin-test\", \"\", \"\")) * on (sitegen_app) group_left label_replace(vector(1), \"sitegen_app\", ${app_selector:json}, \"\", \"\"))[5m:])\n  )\n)\n",
+              "legendFormat": "P99",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "HTTP P99 延迟",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "按 status 标签展示请求速率分布。",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "insertNulls": false,
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "unit": "reqps"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 33
+          },
+          "id": 20,
+          "options": {
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum by (status) (\n  rate(((label_replace(http_server_requests_seconds_count{application=\"rtd-admin\", namespace=\"test\", job=\"rtd-admin\"}, \"sitegen_app\", \"rtd-admin-test\", \"\", \"\")) * on (sitegen_app) group_left label_replace(vector(1), \"sitegen_app\", ${app_selector:json}, \"\", \"\"))[5m:])\n)\n",
+              "legendFormat": "{{status}}",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "HTTP 状态码分布",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "按 application + namespace + method + uri 计算 P95，单位毫秒；仅保留 5 分钟内平均速率高于 1/60 reqps 的接口。OPTIONS 已排除。",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "thresholds"
+              },
+              "custom": {
+                "align": "auto",
+                "cellOptions": {
+                  "type": "auto"
+                },
+                "inspect": false
+              },
+              "unit": "ms"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 9,
+            "w": 12,
+            "x": 12,
+            "y": 33
+          },
+          "id": 21,
+          "options": {
+            "cellHeight": "sm",
+            "footer": {
+              "countRows": false,
+              "fields": "",
+              "reducer": "sum",
+              "show": false
+            },
+            "showHeader": true
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "topk(10,\n  1000 * histogram_quantile(\n    0.95,\n    sum by (le, application, namespace, method, uri) (\n      rate(((label_replace(http_server_requests_seconds_bucket{application=\"rtd-admin\", namespace=\"test\", job=\"rtd-admin\", method!=\"OPTIONS\"}, \"sitegen_app\", \"rtd-admin-test\", \"\", \"\")) * on (sitegen_app) group_left label_replace(vector(1), \"sitegen_app\", ${app_selector:json}, \"\", \"\"))[5m:])\n    )\n  )\n  and on (application, namespace, method, uri)\n  sum by (application, namespace, method, uri) (\n    rate(((label_replace(http_server_requests_seconds_count{application=\"rtd-admin\", namespace=\"test\", job=\"rtd-admin\", method!=\"OPTIONS\"}, \"sitegen_app\", \"rtd-admin-test\", \"\", \"\")) * on (sitegen_app) group_left label_replace(vector(1), \"sitegen_app\", ${app_selector:json}, \"\", \"\"))[5m:])\n  ) > 0.0166666667\n)\n",
+              "format": "table",
+              "instant": true,
+              "range": false,
+              "refId": "A"
+            }
+          ],
+          "title": "慢接口 Top 10",
+          "type": "table"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "按 application + namespace + method + uri 汇总请求速率 Top 10；OPTIONS 已排除。",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "thresholds"
+              },
+              "custom": {
+                "align": "auto",
+                "cellOptions": {
+                  "type": "auto"
+                },
+                "inspect": false
+              },
+              "unit": "reqps"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 9,
+            "w": 12,
+            "x": 0,
+            "y": 42
+          },
+          "id": 22,
+          "options": {
+            "cellHeight": "sm",
+            "footer": {
+              "countRows": false,
+              "fields": "",
+              "reducer": "sum",
+              "show": false
+            },
+            "showHeader": true
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "topk(10,\n  sum by (application, namespace, method, uri) (\n    rate(((label_replace(http_server_requests_seconds_count{application=\"rtd-admin\", namespace=\"test\", job=\"rtd-admin\", method!=\"OPTIONS\"}, \"sitegen_app\", \"rtd-admin-test\", \"\", \"\")) * on (sitegen_app) group_left label_replace(vector(1), \"sitegen_app\", ${app_selector:json}, \"\", \"\"))[5m:])\n  )\n)\n",
+              "format": "table",
+              "instant": true,
+              "range": false,
+              "refId": "A"
+            }
+          ],
+          "title": "高请求量 Endpoint",
+          "type": "table"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "保留 application、namespace 和 method 维度。",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "insertNulls": false,
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "unit": "reqps"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 42
+          },
+          "id": 23,
+          "options": {
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum by (application, namespace, method) (\n  rate(((label_replace(http_server_requests_seconds_count{application=\"rtd-admin\", namespace=\"test\", job=\"rtd-admin\"}, \"sitegen_app\", \"rtd-admin-test\", \"\", \"\")) * on (sitegen_app) group_left label_replace(vector(1), \"sitegen_app\", ${app_selector:json}, \"\", \"\"))[5m:])\n)\n",
+              "legendFormat": "{{application}} / {{method}}",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "按 Method 的 RPS",
+          "type": "timeseries"
+        }
+      ],
+      "title": "HTTP 请求分析",
       "type": "row"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "description": "仅使用已确认的 jvm_memory_used_bytes；按 pod 展示 heap 使用量。其他 JVM 指标需在真实 Prometheus 中确认后再加入模板。",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "unit": "bytes"
-        },
-        "overrides": []
-      },
+      "collapsed": true,
       "gridPos": {
-        "h": 8,
-        "w": 12,
+        "h": 1,
+        "w": 24,
         "x": 0,
-        "y": 113
+        "y": 17
       },
-      "id": 38,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "targets": [
+      "id": 24,
+      "panels": [
         {
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "editorMode": "code",
-          "expr": "sum by (pod) (\n  jvm_memory_used_bytes{application=~\"$application\", application=~\"rtd-admin|user-center-application\", namespace=~\"$namespace\", namespace=~\"test\", job=~\"rtd-admin|user-center-application\", area=\"heap\"}\n)\n",
-          "legendFormat": "{{pod}}",
-          "range": true,
-          "refId": "A"
-        }
-      ],
-      "title": "JVM Heap（按 Pod）",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "description": "container_cpu_usage_seconds_total 按 Pod 聚合；排除 container 为空和 POD 基础容器序列。",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "unit": "none"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 113
-      },
-      "id": 39,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "editorMode": "code",
-          "expr": "sum by (pod) (\n  rate(container_cpu_usage_seconds_total{namespace=~\"$namespace\", namespace=~\"test\", pod=~\"$pod\", container!=\"\", container!=\"POD\"}[5m])\n)\n",
-          "legendFormat": "{{pod}}",
-          "range": true,
-          "refId": "A"
-        }
-      ],
-      "title": "Pod CPU",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "description": "container_memory_working_set_bytes 按 Pod 聚合；排除基础容器，不能与 JVM Heap 混为一谈。",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "unit": "bytes"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 121
-      },
-      "id": 40,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "editorMode": "code",
-          "expr": "sum by (pod) (\n  container_memory_working_set_bytes{namespace=~\"$namespace\", namespace=~\"test\", pod=~\"$pod\", container!=\"\", container!=\"POD\"}\n)\n",
-          "legendFormat": "{{pod}}",
-          "range": true,
-          "refId": "A"
-        }
-      ],
-      "title": "Pod 内存 Working Set",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "description": "被限流的 CFS 周期占比。使用 cAdvisor 标准指标，需通过 sitegen check 在目标 Prometheus 确认。",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "line+area"
-            }
-          },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
+          "description": "仅使用已确认的 jvm_memory_used_bytes；按当前应用和 $pod 筛选，展示每个 Pod 的 heap 使用量。其他 JVM 指标需在真实 Prometheus 中确认后再加入模板。",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
               },
-              {
-                "color": "yellow",
-                "value": 0.1
+              "custom": {
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "insertNulls": false,
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
               },
-              {
-                "color": "red",
-                "value": 0.25
-              }
-            ]
+              "unit": "bytes"
+            },
+            "overrides": []
           },
-          "unit": "percentunit"
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 1
+          },
+          "id": 25,
+          "options": {
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum by (pod) (\n  (((label_replace(jvm_memory_used_bytes{application=\"rtd-admin\", namespace=\"test\", job=\"rtd-admin\", area=\"heap\", pod=~${pod:json}}, \"sitegen_app\", \"rtd-admin-test\", \"\", \"\") or label_replace(jvm_memory_used_bytes{application=\"user-center-application\", namespace=\"test\", job=\"user-center-application\", area=\"heap\", pod=~${pod:json}}, \"sitegen_app\", \"user-center-test\", \"\", \"\"))) * on (sitegen_app) group_left label_replace(vector(1), \"sitegen_app\", ${app_selector:json}, \"\", \"\"))\n)\n",
+              "legendFormat": "{{pod}}",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "JVM Heap（按 Pod）",
+          "type": "timeseries"
         },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 121
-      },
-      "id": 41,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "targets": [
         {
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "editorMode": "code",
-          "expr": "sum by (pod) (\n  rate(container_cpu_cfs_throttled_periods_total{namespace=~\"$namespace\", namespace=~\"test\", pod=~\"$pod\", container!=\"\", container!=\"POD\"}[5m])\n)\n/\nclamp_min(\n  sum by (pod) (\n    rate(container_cpu_cfs_periods_total{namespace=~\"$namespace\", namespace=~\"test\", pod=~\"$pod\", container!=\"\", container!=\"POD\"}[5m])\n  ),\n  1e-9\n)\n",
-          "legendFormat": "{{pod}}",
-          "range": true,
-          "refId": "A"
+          "description": "jvm_memory_used_bytes 按 pod 和内存池 id 展示 heap 分布；与 Pod 总览使用相同的应用和 Pod 归属。",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "insertNulls": false,
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "unit": "bytes"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 1
+          },
+          "id": 26,
+          "options": {
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum by (pod, id) (\n  (((label_replace(jvm_memory_used_bytes{application=\"rtd-admin\", namespace=\"test\", job=\"rtd-admin\", area=\"heap\", pod=~${pod:json}}, \"sitegen_app\", \"rtd-admin-test\", \"\", \"\") or label_replace(jvm_memory_used_bytes{application=\"user-center-application\", namespace=\"test\", job=\"user-center-application\", area=\"heap\", pod=~${pod:json}}, \"sitegen_app\", \"user-center-test\", \"\", \"\"))) * on (sitegen_app) group_left label_replace(vector(1), \"sitegen_app\", ${app_selector:json}, \"\", \"\"))\n)\n",
+              "legendFormat": "{{pod}} / {{id}}",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "JVM Heap（按内存池）",
+          "type": "timeseries"
         }
       ],
-      "title": "CPU Throttling",
-      "type": "timeseries"
+      "title": "应用与 JVM",
+      "type": "row"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "description": "kube_pod_status_phase = 1 的 Pod 数量，按 phase 分类。需要 kube-state-metrics。",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "custom": {
-            "align": "auto",
-            "cellOptions": {
-              "type": "auto"
-            },
-            "inspect": false
-          },
-          "unit": "none"
-        },
-        "overrides": []
-      },
+      "collapsed": true,
       "gridPos": {
-        "h": 8,
-        "w": 12,
+        "h": 1,
+        "w": 24,
         "x": 0,
-        "y": 129
+        "y": 18
       },
-      "id": 42,
-      "options": {
-        "cellHeight": "sm",
-        "footer": {
-          "countRows": false,
-          "fields": "",
-          "reducer": "sum",
-          "show": false
-        },
-        "showHeader": true
-      },
-      "targets": [
+      "id": 27,
+      "panels": [
         {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
+          "gridPos": {
+            "h": 6,
+            "w": 12,
+            "x": 0,
+            "y": 1
           },
-          "editorMode": "code",
-          "expr": "sum by (pod, phase) (\n  kube_pod_status_phase{namespace=~\"$namespace\", namespace=~\"test\", pod=~\"$pod\"} == 1\n)\n",
-          "format": "table",
-          "instant": true,
-          "range": false,
-          "refId": "A"
+          "id": 28,
+          "options": {
+            "code": {
+              "language": "plaintext",
+              "showLineNumbers": false,
+              "showMiniMap": false
+            },
+            "content": "### SkyWalking 服务映射\n\n未配置 SkyWalking UI 地址。以下是 YAML 中声明的 Prometheus 应用与 SkyWalking Service 映射关系；配置 `spec.links.skywalking` 后可从这里下钻。\n\n- `rtd-admin/test` → SkyWalking Service `rtd-admin_test`\n- `user-center-application/test` → SkyWalking Service `user-center-application_test`\n\n未配置 `skywalkingServiceURLTemplate`；不会把 SkyWalking 首页伪装成具体 Service 页面。\n\n未配置 `skywalkingEndpointURLTemplate`；不会生成 Endpoint 专属链接，请从 SkyWalking Service 页面进入 Endpoint 排行。\n\nYAML 声明的 Endpoint 维度格式：`{method}:{uri}`",
+            "mode": "markdown"
+          },
+          "title": "SkyWalking 服务映射与下钻",
+          "type": "text"
+        },
+        {
+          "gridPos": {
+            "h": 6,
+            "w": 12,
+            "x": 12,
+            "y": 1
+          },
+          "id": 29,
+          "options": {
+            "code": {
+              "language": "plaintext",
+              "showLineNumbers": false,
+              "showMiniMap": false
+            },
+            "content": "### YAML 显式依赖（配置关系，非 SkyWalking 实测拓扑）\n\n- `rtd-admin/test` → user-center-application/test, MySQL Test, Redis Test\n- `user-center-application/test` → MySQL Test, Redis Test\n\n本 Dashboard 不伪造调用拓扑；实际调用关系请以 SkyWalking 服务拓扑和 Trace 为准。",
+            "mode": "markdown"
+          },
+          "title": "YAML 配置依赖",
+          "type": "text"
         }
       ],
-      "title": "Pod 状态",
-      "type": "table"
+      "title": "服务调用关系",
+      "type": "row"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "description": "当前筛选 Pod 按 node 的数量分布，来自 kube_pod_info。",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "custom": {
-            "align": "auto",
-            "cellOptions": {
-              "type": "auto"
-            },
-            "inspect": false
-          },
-          "unit": "short"
-        },
-        "overrides": []
-      },
+      "collapsed": true,
       "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 129
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 19
       },
-      "id": 43,
-      "options": {
-        "cellHeight": "sm",
-        "footer": {
-          "countRows": false,
-          "fields": "",
-          "reducer": "sum",
-          "show": false
+      "id": 30,
+      "panels": [
+        {
+          "gridPos": {
+            "h": 6,
+            "w": 12,
+            "x": 0,
+            "y": 1
+          },
+          "id": 31,
+          "options": {
+            "code": {
+              "language": "plaintext",
+              "showLineNumbers": false,
+              "showMiniMap": false
+            },
+            "content": "### 站点依赖组件\n\n- `mysql-test` MySQL Test（类型 `mysql`，job `scrapeConfig/monitoring/mysql-exporter-test`）\n- `redis-test` Redis Test（类型 `redis`，job `scrapeConfig/monitoring/redis-exporter`）\n\n组件状态面板只在站点健康总览中生成一次，依赖组件的性能指标请进入专业 Dashboard 查看。",
+            "mode": "markdown"
+          },
+          "title": "依赖组件与下钻",
+          "type": "text"
+        }
+      ],
+      "title": "依赖组件",
+      "type": "row"
+    },
+    {
+      "collapsed": true,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 20
+      },
+      "id": 32,
+      "panels": [
+        {
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 1
+          },
+          "id": 33,
+          "options": {
+            "code": {
+              "language": "plaintext",
+              "showLineNumbers": false,
+              "showMiniMap": false
+            },
+            "content": "### 容器过滤条件未配置\n\n以下应用未配置 `kubernetes.containerMatchers`：`rtd-admin-test`、`user-center-test`。\n\nPod CPU/内存可能包含 Pause 容器或 Pod 父级 cgroup 序列。请通过 `sitegen check` 核对真实标签结构后，在应用配置中补充容器过滤条件（例如 image 或 container 标签）。",
+            "mode": "markdown"
+          },
+          "title": "容器过滤条件提示",
+          "type": "text"
         },
-        "showHeader": true
-      },
-      "targets": [
         {
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "editorMode": "code",
-          "expr": "count by (node) (\n  kube_pod_info{namespace=~\"$namespace\", namespace=~\"test\", pod=~\"$pod\"}\n)\n",
-          "format": "table",
-          "instant": true,
-          "range": false,
-          "refId": "A"
+          "description": "仅统计当前应用所属 Pod；CPU 单位为 Core。容器过滤条件来自应用配置，未验证时不硬编码 container 标签。",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "insertNulls": false,
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "unit": "none"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 1
+          },
+          "id": 34,
+          "options": {
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum by (pod) (\n  rate(((((container_cpu_usage_seconds_total{namespace=\"test\", pod=~${pod:json}} * on (namespace, pod) group_left(sitegen_app) max by (namespace, pod, sitegen_app) (label_replace(kube_pod_labels{namespace=\"test\", label_app=\"rtd-admin\"}, \"sitegen_app\", \"rtd-admin-test\", \"\", \"\"))) or (container_cpu_usage_seconds_total{namespace=\"test\", pod=~${pod:json}} * on (namespace, pod) group_left(sitegen_app) max by (namespace, pod, sitegen_app) (label_replace(kube_pod_labels{namespace=\"test\", label_app=\"user-center-application\"}, \"sitegen_app\", \"user-center-test\", \"\", \"\"))))) * on (sitegen_app) group_left label_replace(vector(1), \"sitegen_app\", ${app_selector:json}, \"\", \"\"))[5m:])\n)\n",
+              "legendFormat": "{{pod}}",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "Pod CPU",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "仅统计当前应用所属 Pod 的 container_memory_working_set_bytes，不能与 JVM Heap 混为一谈。",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "insertNulls": false,
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "unit": "bytes"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 9
+          },
+          "id": 35,
+          "options": {
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum by (pod) (\n  ((((container_memory_working_set_bytes{namespace=\"test\", pod=~${pod:json}} * on (namespace, pod) group_left(sitegen_app) max by (namespace, pod, sitegen_app) (label_replace(kube_pod_labels{namespace=\"test\", label_app=\"rtd-admin\"}, \"sitegen_app\", \"rtd-admin-test\", \"\", \"\"))) or (container_memory_working_set_bytes{namespace=\"test\", pod=~${pod:json}} * on (namespace, pod) group_left(sitegen_app) max by (namespace, pod, sitegen_app) (label_replace(kube_pod_labels{namespace=\"test\", label_app=\"user-center-application\"}, \"sitegen_app\", \"user-center-test\", \"\", \"\"))))) * on (sitegen_app) group_left label_replace(vector(1), \"sitegen_app\", ${app_selector:json}, \"\", \"\"))\n)\n",
+              "legendFormat": "{{pod}}",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "Pod 内存 Working Set",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "当前应用 Pod 被限流的 CFS 周期占比。使用 cAdvisor 标准指标，需通过 sitegen check 在目标 Prometheus 确认。",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "insertNulls": false,
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "line+area"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 0.1
+                  },
+                  {
+                    "color": "red",
+                    "value": 0.25
+                  }
+                ]
+              },
+              "unit": "percentunit"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 9
+          },
+          "id": 36,
+          "options": {
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum by (pod) (\n  rate(((((container_cpu_cfs_throttled_periods_total{namespace=\"test\", pod=~${pod:json}} * on (namespace, pod) group_left(sitegen_app) max by (namespace, pod, sitegen_app) (label_replace(kube_pod_labels{namespace=\"test\", label_app=\"rtd-admin\"}, \"sitegen_app\", \"rtd-admin-test\", \"\", \"\"))) or (container_cpu_cfs_throttled_periods_total{namespace=\"test\", pod=~${pod:json}} * on (namespace, pod) group_left(sitegen_app) max by (namespace, pod, sitegen_app) (label_replace(kube_pod_labels{namespace=\"test\", label_app=\"user-center-application\"}, \"sitegen_app\", \"user-center-test\", \"\", \"\"))))) * on (sitegen_app) group_left label_replace(vector(1), \"sitegen_app\", ${app_selector:json}, \"\", \"\"))[5m:])\n)\n/\nclamp_min(\n  sum by (pod) (\n    rate(((((container_cpu_cfs_periods_total{namespace=\"test\", pod=~${pod:json}} * on (namespace, pod) group_left(sitegen_app) max by (namespace, pod, sitegen_app) (label_replace(kube_pod_labels{namespace=\"test\", label_app=\"rtd-admin\"}, \"sitegen_app\", \"rtd-admin-test\", \"\", \"\"))) or (container_cpu_cfs_periods_total{namespace=\"test\", pod=~${pod:json}} * on (namespace, pod) group_left(sitegen_app) max by (namespace, pod, sitegen_app) (label_replace(kube_pod_labels{namespace=\"test\", label_app=\"user-center-application\"}, \"sitegen_app\", \"user-center-test\", \"\", \"\"))))) * on (sitegen_app) group_left label_replace(vector(1), \"sitegen_app\", ${app_selector:json}, \"\", \"\"))[5m:])\n  ),\n  1e-9\n)\n",
+              "legendFormat": "{{pod}}",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "CPU Throttling",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "当前应用所属 Pod 按 phase 的数量分布。需要 kube-state-metrics。",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "thresholds"
+              },
+              "custom": {
+                "align": "auto",
+                "cellOptions": {
+                  "type": "auto"
+                },
+                "inspect": false
+              },
+              "unit": "none"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 17
+          },
+          "id": 37,
+          "options": {
+            "cellHeight": "sm",
+            "footer": {
+              "countRows": false,
+              "fields": "",
+              "reducer": "sum",
+              "show": false
+            },
+            "showHeader": true
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum by (pod, phase) (\n  ((((kube_pod_status_phase{namespace=\"test\", pod=~${pod:json}} * on (namespace, pod) group_left(sitegen_app) max by (namespace, pod, sitegen_app) (label_replace(kube_pod_labels{namespace=\"test\", label_app=\"rtd-admin\"}, \"sitegen_app\", \"rtd-admin-test\", \"\", \"\"))) or (kube_pod_status_phase{namespace=\"test\", pod=~${pod:json}} * on (namespace, pod) group_left(sitegen_app) max by (namespace, pod, sitegen_app) (label_replace(kube_pod_labels{namespace=\"test\", label_app=\"user-center-application\"}, \"sitegen_app\", \"user-center-test\", \"\", \"\"))))) * on (sitegen_app) group_left label_replace(vector(1), \"sitegen_app\", ${app_selector:json}, \"\", \"\")) == 1\n)\n",
+              "format": "table",
+              "instant": true,
+              "range": false,
+              "refId": "A"
+            }
+          ],
+          "title": "Pod 状态",
+          "type": "table"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "当前应用所属 Pod 按 node 的数量分布，来自 kube_pod_info。",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "thresholds"
+              },
+              "custom": {
+                "align": "auto",
+                "cellOptions": {
+                  "type": "auto"
+                },
+                "inspect": false
+              },
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 17
+          },
+          "id": 38,
+          "options": {
+            "cellHeight": "sm",
+            "footer": {
+              "countRows": false,
+              "fields": "",
+              "reducer": "sum",
+              "show": false
+            },
+            "showHeader": true
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "count by (node) (\n  ((((kube_pod_info{namespace=\"test\", pod=~${pod:json}} * on (namespace, pod) group_left(sitegen_app) max by (namespace, pod, sitegen_app) (label_replace(kube_pod_labels{namespace=\"test\", label_app=\"rtd-admin\"}, \"sitegen_app\", \"rtd-admin-test\", \"\", \"\"))) or (kube_pod_info{namespace=\"test\", pod=~${pod:json}} * on (namespace, pod) group_left(sitegen_app) max by (namespace, pod, sitegen_app) (label_replace(kube_pod_labels{namespace=\"test\", label_app=\"user-center-application\"}, \"sitegen_app\", \"user-center-test\", \"\", \"\"))))) * on (sitegen_app) group_left label_replace(vector(1), \"sitegen_app\", ${app_selector:json}, \"\", \"\"))\n)\n",
+              "format": "table",
+              "instant": true,
+              "range": false,
+              "refId": "A"
+            }
+          ],
+          "title": "Pod Node 分布",
+          "type": "table"
         }
       ],
-      "title": "Pod Node 分布",
-      "type": "table"
+      "title": "Kubernetes 运行环境",
+      "type": "row"
     }
   ],
   "refresh": "30s",
@@ -2760,7 +2253,7 @@
     "sitegen",
     "site:order-admin-test",
     "environment:test",
-    "sitegen-template:1.0.0+cefc905fb01fc2d1",
+    "sitegen-template:1.0.0+4b4761721e16116f",
     "sitegen-dashboard-template:1881d654dc427ef8"
   ],
   "templating": {
@@ -2780,31 +2273,28 @@
         "type": "datasource"
       },
       {
-        "allValue": ".*",
         "current": {
           "selected": true,
-          "text": "All",
-          "value": "$__all"
+          "text": "rtd-admin / test",
+          "value": "rtd-admin-test"
         },
-        "definition": "rtd-admin,user-center-application",
+        "definition": "rtd-admin-test,user-center-test",
         "hide": 0,
-        "includeAll": true,
-        "label": "应用",
-        "multi": true,
-        "name": "application",
+        "label": "应用实例",
+        "name": "app_selector",
         "options": [
           {
-            "selected": false,
-            "text": "rtd-admin",
-            "value": "rtd-admin"
+            "selected": true,
+            "text": "rtd-admin / test",
+            "value": "rtd-admin-test"
           },
           {
             "selected": false,
-            "text": "user-center-application",
-            "value": "user-center-application"
+            "text": "user-center-application / test",
+            "value": "user-center-test"
           }
         ],
-        "query": "rtd-admin,user-center-application",
+        "query": "rtd-admin-test,user-center-test",
         "type": "custom"
       },
       {
@@ -2818,94 +2308,16 @@
           "type": "prometheus",
           "uid": "${datasource}"
         },
-        "definition": "label_values(http_server_requests_seconds_count{application=~\"$application\", application=~\"rtd-admin|user-center-application\", namespace=~\"test\"}, namespace)",
-        "hide": 0,
-        "includeAll": true,
-        "label": "Namespace",
-        "multi": true,
-        "name": "namespace",
-        "query": "label_values(http_server_requests_seconds_count{application=~\"$application\", application=~\"rtd-admin|user-center-application\", namespace=~\"test\"}, namespace)",
-        "refresh": 2,
-        "sort": 1,
-        "type": "query"
-      },
-      {
-        "allValue": ".*",
-        "current": {
-          "selected": true,
-          "text": "All",
-          "value": "$__all"
-        },
-        "datasource": {
-          "type": "prometheus",
-          "uid": "${datasource}"
-        },
-        "definition": "label_values(jvm_memory_used_bytes{application=~\"$application\", application=~\"rtd-admin|user-center-application\", namespace=~\"$namespace\", namespace=~\"test\"}, pod)",
+        "definition": "query_result(((label_replace(jvm_memory_used_bytes{application=\"rtd-admin\", namespace=\"test\", job=\"rtd-admin\"}, \"sitegen_app\", \"rtd-admin-test\", \"\", \"\") or label_replace(kube_pod_labels{namespace=\"test\", label_app=\"rtd-admin\"}, \"sitegen_app\", \"rtd-admin-test\", \"\", \"\") or label_replace(jvm_memory_used_bytes{application=\"user-center-application\", namespace=\"test\", job=\"user-center-application\"}, \"sitegen_app\", \"user-center-test\", \"\", \"\") or label_replace(kube_pod_labels{namespace=\"test\", label_app=\"user-center-application\"}, \"sitegen_app\", \"user-center-test\", \"\", \"\"))) * on (sitegen_app) group_left label_replace(vector(1), \"sitegen_app\", ${app_selector:json}, \"\", \"\"))",
         "hide": 0,
         "includeAll": true,
         "label": "Pod",
-        "multi": true,
         "name": "pod",
-        "query": "label_values(jvm_memory_used_bytes{application=~\"$application\", application=~\"rtd-admin|user-center-application\", namespace=~\"$namespace\", namespace=~\"test\"}, pod)",
+        "query": "query_result(((label_replace(jvm_memory_used_bytes{application=\"rtd-admin\", namespace=\"test\", job=\"rtd-admin\"}, \"sitegen_app\", \"rtd-admin-test\", \"\", \"\") or label_replace(kube_pod_labels{namespace=\"test\", label_app=\"rtd-admin\"}, \"sitegen_app\", \"rtd-admin-test\", \"\", \"\") or label_replace(jvm_memory_used_bytes{application=\"user-center-application\", namespace=\"test\", job=\"user-center-application\"}, \"sitegen_app\", \"user-center-test\", \"\", \"\") or label_replace(kube_pod_labels{namespace=\"test\", label_app=\"user-center-application\"}, \"sitegen_app\", \"user-center-test\", \"\", \"\"))) * on (sitegen_app) group_left label_replace(vector(1), \"sitegen_app\", ${app_selector:json}, \"\", \"\"))",
+        "regex": "/pod=\"([^\"]+)\"/",
         "refresh": 2,
         "sort": 1,
         "type": "query"
-      },
-      {
-        "allValue": ".*",
-        "current": {
-          "selected": true,
-          "text": "All",
-          "value": "$__all"
-        },
-        "definition": "mysql-test,redis-test",
-        "hide": 0,
-        "includeAll": true,
-        "label": "组件",
-        "multi": true,
-        "name": "component",
-        "options": [
-          {
-            "selected": false,
-            "text": "MySQL Test",
-            "value": "mysql-test"
-          },
-          {
-            "selected": false,
-            "text": "Redis Test",
-            "value": "redis-test"
-          }
-        ],
-        "query": "mysql-test,redis-test",
-        "type": "custom"
-      },
-      {
-        "allValue": ".*",
-        "current": {
-          "selected": true,
-          "text": "All",
-          "value": "$__all"
-        },
-        "definition": "10.10.100.10:3307,redis://10.10.100.10:26379",
-        "hide": 0,
-        "includeAll": true,
-        "label": "Instance",
-        "multi": true,
-        "name": "instance",
-        "options": [
-          {
-            "selected": false,
-            "text": "MySQL Test / 10.10.100.10:3307",
-            "value": "10.10.100.10:3307"
-          },
-          {
-            "selected": false,
-            "text": "Redis Test / redis://10.10.100.10:26379",
-            "value": "redis://10.10.100.10:26379"
-          }
-        ],
-        "query": "10.10.100.10:3307,redis://10.10.100.10:26379",
-        "type": "custom"
       }
     ]
   },

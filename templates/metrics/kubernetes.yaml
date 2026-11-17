@@ -5,54 +5,61 @@ profiles:
     target: application
     scope: namespace
     panels:
+      # The builder adds the exact namespace, the application's pod ownership
+      # constraint (kube_pod_labels or pod-regex) and optional container
+      # matchers. No container label is assumed here: cAdvisor samples differ
+      # between clusters, and a hard-coded container filter can silently
+      # remove every series.
       - id: pod-cpu
         name: Pod CPU
-        description: container_cpu_usage_seconds_total 按 Pod 聚合；排除 container 为空和 POD 基础容器序列。
+        description: 仅统计当前应用所属 Pod；CPU 单位为 Core。容器过滤条件来自应用配置，未验证时不硬编码 container 标签。
         query: |
           sum by (pod) (
-            rate(container_cpu_usage_seconds_total{%SELECTOR%, container!="", container!="POD"}[5m])
+            rate(container_cpu_usage_seconds_total{%SELECTOR%}[5m])
           )
         unit: none
         panel: timeseries
         legendFormat: "{{pod}}"
-        sections: [runtime, environment]
+        sections: [environment]
         requiredMetrics:
           - container_cpu_usage_seconds_total
-        requiredLabels: [namespace, pod, container]
+        requiredLabels: [namespace, pod]
+        optionalLabels: [container]
 
       - id: pod-memory
         name: Pod 内存 Working Set
-        description: container_memory_working_set_bytes 按 Pod 聚合；排除基础容器，不能与 JVM Heap 混为一谈。
+        description: 仅统计当前应用所属 Pod 的 container_memory_working_set_bytes，不能与 JVM Heap 混为一谈。
         query: |
           sum by (pod) (
-            container_memory_working_set_bytes{%SELECTOR%, container!="", container!="POD"}
+            container_memory_working_set_bytes{%SELECTOR%}
           )
         unit: bytes
         panel: timeseries
         legendFormat: "{{pod}}"
-        sections: [runtime, environment]
+        sections: [environment]
         requiredMetrics:
           - container_memory_working_set_bytes
-        requiredLabels: [namespace, pod, container]
+        requiredLabels: [namespace, pod]
+        optionalLabels: [container]
 
       - id: cpu-throttling
         name: CPU Throttling
-        description: 被限流的 CFS 周期占比。使用 cAdvisor 标准指标，需通过 sitegen check 在目标 Prometheus 确认。
+        description: 当前应用 Pod 被限流的 CFS 周期占比。使用 cAdvisor 标准指标，需通过 sitegen check 在目标 Prometheus 确认。
         query: |
           sum by (pod) (
-            rate(container_cpu_cfs_throttled_periods_total{%SELECTOR%, container!="", container!="POD"}[5m])
+            rate(container_cpu_cfs_throttled_periods_total{%SELECTOR%}[5m])
           )
           /
           clamp_min(
             sum by (pod) (
-              rate(container_cpu_cfs_periods_total{%SELECTOR%, container!="", container!="POD"}[5m])
+              rate(container_cpu_cfs_periods_total{%SELECTOR%}[5m])
             ),
             1e-9
           )
         unit: percentunit
         panel: timeseries
         legendFormat: "{{pod}}"
-        sections: [runtime, environment]
+        sections: [environment]
         thresholds:
           - color: green
           - color: yellow
@@ -62,11 +69,12 @@ profiles:
         requiredMetrics:
           - container_cpu_cfs_throttled_periods_total
           - container_cpu_cfs_periods_total
-        requiredLabels: [namespace, pod, container]
+        requiredLabels: [namespace, pod]
+        optionalLabels: [container]
 
       - id: pod-status
         name: Pod 状态
-        description: kube_pod_status_phase = 1 的 Pod 数量，按 phase 分类。需要 kube-state-metrics。
+        description: 当前应用所属 Pod 按 phase 的数量分布。需要 kube-state-metrics。
         query: |
           sum by (pod, phase) (
             kube_pod_status_phase{%SELECTOR%} == 1
@@ -81,7 +89,7 @@ profiles:
 
       - id: pod-node-distribution
         name: Pod Node 分布
-        description: 当前筛选 Pod 按 node 的数量分布，来自 kube_pod_info。
+        description: 当前应用所属 Pod 按 node 的数量分布，来自 kube_pod_info。
         query: |
           count by (node) (
             kube_pod_info{%SELECTOR%}

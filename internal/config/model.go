@@ -13,6 +13,19 @@ const (
 	TargetDomain      = "domain"
 
 	DefaultEndpointFormat = "{method}:{uri}"
+
+	// PodSelectorLabels correlates an application with pods using
+	// kube-state-metrics pod labels.
+	PodSelectorLabels = "labels"
+	// PodSelectorPodRegex is the compatibility mode that matches pod names
+	// directly. It must carry a warning because pod names change on rollout.
+	PodSelectorPodRegex = "pod-regex"
+
+	DefaultPodLabelsMetric = "kube_pod_labels"
+
+	// SitegenAppLabel is a derived label added by generated queries to carry
+	// the configured application ID. It is reserved and cannot be set by users.
+	SitegenAppLabel = "sitegen_app"
 )
 
 // Site is the root of a site configuration document.
@@ -39,11 +52,15 @@ type Spec struct {
 	Links        Links         `yaml:"links,omitempty" json:"links,omitempty"`
 }
 
-// Domain is an externally probed entry point.
+// Domain is an externally probed entry point. EntryApplications explicitly
+// declares which configured applications receive traffic from this domain.
+// The relationship is intentionally explicit: application roles are never
+// inferred from names.
 type Domain struct {
-	ID       string   `yaml:"id" json:"id"`
-	URL      string   `yaml:"url" json:"url"`
-	Blackbox Blackbox `yaml:"blackbox" json:"blackbox"`
+	ID                string   `yaml:"id" json:"id"`
+	URL               string   `yaml:"url" json:"url"`
+	Blackbox          Blackbox `yaml:"blackbox" json:"blackbox"`
+	EntryApplications []string `yaml:"entryApplications,omitempty" json:"entryApplications,omitempty"`
 }
 
 // Blackbox describes the Blackbox Exporter series used for a domain.
@@ -60,7 +77,37 @@ type Application struct {
 	Prometheus   Prometheus `yaml:"prometheus" json:"prometheus"`
 	Skywalking   Skywalking `yaml:"skywalking" json:"skywalking"`
 	Metrics      []string   `yaml:"metrics" json:"metrics"`
+	Kubernetes   Kubernetes `yaml:"kubernetes,omitempty" json:"kubernetes,omitempty"`
 	Dependencies []string   `yaml:"dependencies,omitempty" json:"dependencies,omitempty"`
+}
+
+// Kubernetes describes how an application's pods are identified in Kubernetes
+// metrics. Container metrics do not carry the application label, so pod
+// ownership must be declared explicitly.
+type Kubernetes struct {
+	PodSelector       *PodSelector      `yaml:"podSelector,omitempty" json:"podSelector,omitempty"`
+	ContainerMatchers map[string]string `yaml:"containerMatchers,omitempty" json:"containerMatchers,omitempty"`
+}
+
+// PodSelector identifies the pods that belong to an application.
+type PodSelector struct {
+	Mode     string            `yaml:"mode" json:"mode"`
+	Metric   string            `yaml:"metric,omitempty" json:"metric,omitempty"`
+	Matchers map[string]string `yaml:"matchers,omitempty" json:"matchers,omitempty"`
+	Pod      string            `yaml:"pod,omitempty" json:"pod,omitempty"`
+}
+
+// Enabled reports whether a pod selector is configured.
+func (k Kubernetes) Enabled() bool {
+	return k.PodSelector != nil
+}
+
+// PodLabelMetric returns the metric used to correlate pod labels.
+func (p PodSelector) PodLabelMetric() string {
+	if p.Metric != "" {
+		return p.Metric
+	}
+	return DefaultPodLabelsMetric
 }
 
 // Prometheus describes an application selector. Applications are identified
@@ -122,6 +169,9 @@ func Normalize(site *Site) {
 		d.URL = strings.TrimSpace(d.URL)
 		d.Blackbox.Job = strings.TrimSpace(d.Blackbox.Job)
 		d.Blackbox.Instance = strings.TrimSpace(d.Blackbox.Instance)
+		for j := range d.EntryApplications {
+			d.EntryApplications[j] = strings.TrimSpace(d.EntryApplications[j])
+		}
 	}
 
 	for i := range site.Spec.Applications {
@@ -147,6 +197,27 @@ func Normalize(site *Site) {
 		if _, ok := app.Prometheus.Labels["namespace"]; !ok {
 			app.Prometheus.Labels["namespace"] = app.Namespace
 		}
+		if app.Kubernetes.PodSelector != nil {
+			ps := app.Kubernetes.PodSelector
+			ps.Mode = strings.TrimSpace(ps.Mode)
+			ps.Metric = strings.TrimSpace(ps.Metric)
+			ps.Pod = strings.TrimSpace(ps.Pod)
+			if ps.Mode == PodSelectorLabels && ps.Metric == "" {
+				ps.Metric = DefaultPodLabelsMetric
+			}
+			if ps.Matchers == nil {
+				ps.Matchers = map[string]string{}
+			}
+			for key, value := range ps.Matchers {
+				ps.Matchers[key] = strings.TrimSpace(value)
+			}
+		}
+		if app.Kubernetes.ContainerMatchers == nil {
+			app.Kubernetes.ContainerMatchers = map[string]string{}
+		}
+		for key, value := range app.Kubernetes.ContainerMatchers {
+			app.Kubernetes.ContainerMatchers[key] = strings.TrimSpace(value)
+		}
 	}
 
 	for i := range site.Spec.Components {
@@ -167,6 +238,59 @@ func (s *Site) ApplicationByID(id string) (*Application, bool) {
 		}
 	}
 	return nil, false
+}
+
+// EntryApplicationIDs returns the ordered, de-duplicated set of configured
+// entry application IDs across all domains.
+func (s *Site) EntryApplicationIDs() []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, domain := range s.Spec.Domains {
+		for _, id := range domain.EntryApplications {
+			if id == "" || seen[id] {
+				continue
+			}
+			seen[id] = true
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
+// ApplicationsWithMetric returns configured applications that enable a profile.
+func (s *Site) ApplicationsWithMetric(profileID string) []Application {
+	out := make([]Application, 0, len(s.Spec.Applications))
+	for _, app := range s.Spec.Applications {
+		if app.HasMetric(profileID) {
+			out = append(out, app)
+		}
+	}
+	return out
+}
+
+// EntryApplicationsWithMetric returns entry applications that enable a profile.
+func (s *Site) EntryApplicationsWithMetric(profileID string) []Application {
+	seen := map[string]bool{}
+	out := make([]Application, 0)
+	for _, id := range s.EntryApplicationIDs() {
+		app, ok := s.ApplicationByID(id)
+		if !ok || seen[app.ID] || !app.HasMetric(profileID) {
+			continue
+		}
+		seen[app.ID] = true
+		out = append(out, *app)
+	}
+	return out
+}
+
+// HasMetric reports whether an application enables a metric profile.
+func (a Application) HasMetric(profileID string) bool {
+	for _, id := range a.Metrics {
+		if id == profileID {
+			return true
+		}
+	}
+	return false
 }
 
 // ComponentByID returns a component by its stable configuration ID.

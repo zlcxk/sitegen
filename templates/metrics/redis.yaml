@@ -7,13 +7,13 @@ profiles:
     componentTypes: [redis]
     panels:
       - id: redis-up
-        name: Redis 状态
-        description: 仅使用已确认的 redis_up。内存、命中率、连接数等指标需在目标 Prometheus 确认后再加入模板。
+        name: Redis 连接状态
+        description: redis_up=1 表示 exporter 对 Redis 的连接检查成功，不代表业务健康；内存、命中率、连接数等指标需在目标 Prometheus 确认后再加入模板。
         query: |
           max(redis_up{%SELECTOR%})
         unit: none
         panel: stat
-        sections: [overview, component]
+        sections: [overview]
         instant: true
         thresholds:
           - color: red

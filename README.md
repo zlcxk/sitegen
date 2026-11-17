@@ -90,7 +90,8 @@ site-observability/
 最小完整示例见 [sites/examples/order-admin-test.yaml](sites/examples/order-admin-test.yaml)。核心约束：
 
 - 站点 ID、域名 ID、应用 ID、组件 ID **全局唯一**；
-- 应用由 `application + namespace` 唯一确定；
+- 应用由 `application + namespace` 唯一确定，查询时还会同时使用该应用的 `job` 和全部额外标签；
+- 域名的 `entryApplications` 显式声明外部入口应用；应用角色绝不根据名称推断；
 - SkyWalking Service 默认自动生成 `{application}_{namespace}`，也可手动指定；
 - 依赖必须显式引用已存在的应用或组件 ID，不根据名称推断；
 - 所有指标模板 ID 必须存在于模板注册表；
@@ -114,6 +115,8 @@ spec:
       blackbox:
         job: blackbox-sites
         instance: https://admin-test.rtdgo.tech
+      # 只有这里显式声明的应用才会计入站点外部请求量。
+      entryApplications: [rtd-admin-test]
 
   applications:
     - id: rtd-admin-test
@@ -131,6 +134,18 @@ spec:
         endpointFormat: "{method}:{uri}"
 
       metrics: [http, jvm, kubernetes]
+
+      kubernetes:
+        # cAdvisor 没有 application 标签，必须显式声明 Pod 归属。
+        # 标签名必须根据目标 Prometheus 的真实 kube_pod_labels 结构确认。
+        podSelector:
+          mode: labels
+          metric: kube_pod_labels
+          matchers:
+            label_app: rtd-admin
+        # 可选。未配置时会输出 WARN，且不会硬编码 container 过滤条件。
+        containerMatchers: {}
+
       dependencies: [user-center-test, mysql-test, redis-test]
 
   components:
@@ -143,7 +158,9 @@ spec:
       metrics: [mysql-basic]
 ```
 
-`prometheus.labels` 中的额外标签会用于组件精确筛选；应用指标查询会同时使用 `application`、`namespace` 和站点 Job 集合。对应用而言，只有**所有应用都一致**的额外标签才会被加入聚合查询，避免选择器互相冲突。
+每个应用对象都以完整 Selector 参与查询：`application`、`namespace`、`job` 和该应用自己的全部额外标签。多应用聚合不会把标签正则简单拼接，而是先按应用对象逐一编译精确 Selector，再用 `or` 合并；因此不会出现 `app-a + dev` 这类配置中不存在的交叉组合。
+
+Kubernetes 指标不使用 Namespace 全量查询。应用必须通过 `kubernetes.podSelector` 声明 Pod 归属，Builder 会使用 `kube_pod_labels`（或经过验证的 `pod-regex` 兼容模式）与 cAdvisor 指标按 `namespace + pod` 关联。未配置 Pod 归属的应用会跳过应用级 Kubernetes 面板并输出 WARN。
 
 JSON Schema 位于 [schemas/site.schema.json](schemas/site.schema.json)，可用于编辑器补全。加载器本身仍会执行严格字段检查和跨对象校验。
 
@@ -210,10 +227,10 @@ JSON Schema 位于 [schemas/site.schema.json](schemas/site.schema.json)，可用
 | Profile | 对象 | 已使用指标 | 说明 |
 | --- | --- | --- | --- |
 | `blackbox`（自动） | 域名 | `probe_success`, `probe_duration_seconds` | 可用性与探测耗时 |
-| `platform`（自动） | 应用 | `up` | 按 Job 展示应用抓取健康 |
-| `http` | 应用 | `http_server_requests_seconds_count/sum/bucket` | RPS、成功率、P95/P99、状态码、5xx、慢接口、Top Endpoint |
-| `jvm` | 应用 | `jvm_memory_used_bytes` | 仅使用已确认的 Heap 指标 |
-| `kubernetes` | 应用 | `container_cpu_usage_seconds_total`, `container_memory_working_set_bytes`, `container_cpu_cfs_throttled_periods_total`, `container_cpu_cfs_periods_total`, `kube_pod_status_phase`, `kube_pod_info` | 排除 `container=""` 和 `container="POD"` |
+| `platform`（自动） | 应用 | `up` | 按 Job 展示 Prometheus 指标采集状态（不代表业务健康） |
+| `http` | 应用 | `http_server_requests_seconds_count/sum/bucket` | RPS、2xx/3xx/4xx/5xx 比例、毫秒延迟、状态码、慢接口、Top Endpoint |
+| `jvm` | 应用 | `jvm_memory_used_bytes` | 仅使用已确认的 Heap 指标，按 Pod 筛选 |
+| `kubernetes` | 应用 | `container_cpu_usage_seconds_total`, `container_memory_working_set_bytes`, `container_cpu_cfs_throttled_periods_total`, `container_cpu_cfs_periods_total`, `kube_pod_status_phase`, `kube_pod_info`, `kube_pod_labels` | 通过 `podSelector` 约束 Pod 归属；不硬编码未验证的 container 过滤 |
 | `mysql-basic` | MySQL | `mysql_up` | 其他性能指标待真实环境确认 |
 | `redis-basic` | Redis | `redis_up` | 其他性能指标待真实环境确认 |
 | `kafka-basic` | Kafka | `kafka_brokers` | Broker 数不能代表完整健康；Consumer Lag 后续增强 |
@@ -223,11 +240,13 @@ JSON Schema 位于 [schemas/site.schema.json](schemas/site.schema.json)，可用
 约束：
 
 - **不虚构指标名**。未在目标 Prometheus 中确认的指标不加入模板；JVM GC/Threads 等暂不提供面板。
-- 所有模板都有 `requiredMetrics` / `requiredLabels`，`check` 会验证。
-- HTTP 查询统一使用 `application + namespace + 站点 Job 集合`。
-- 慢接口 Top 10 使用 `method + uri` 的 P95，并通过请求速率阈值（> 1/60 reqps）过滤低流量接口；OPTIONS 默认排除。
-- 组件查询使用 YAML 中的 Job、Instance 和额外标签精确筛选；
-- 指标模板按站点启用：只要站点内一个应用启用了某 profile，就生成该 profile 的站点级面板；应用变量用于选择查看范围，`check` 仍按应用逐一验证指标与标签。
+- 所有模板都有 `requiredMetrics` / `requiredLabels`，`check` 会按标签统计实际覆盖数量；必需标签不完整时直接 FAIL。
+- HTTP 查询以应用对象为最小单位，使用完整精确 Selector；站点总览只汇总 `entryApplications` 中启用 HTTP 的入口应用。
+- 慢接口 Top 10 使用 `application + namespace + method + uri` 的 P95，并通过速率阈值（> 1/60 reqps）过滤低流量接口；OPTIONS 默认排除。
+- 延迟统一以毫秒展示；PromQL 已乘以 1000，Grafana 单位固定为 `ms`。
+- 组件查询使用 YAML 中的 Job、Instance 和额外标签精确筛选。
+- 指标模板按应用启用范围生成：未启用 HTTP 的应用不会进入 HTTP 查询；未启用 JVM 的应用不会进入 JVM 查询。
+- 站点级汇总不使用 `$app_selector`，应用级详细面板使用单选 `$app_selector`；第一版不允许应用对象再次被独立组合。
 
 ---
 
@@ -297,22 +316,24 @@ SITEGEN_CONFIG
 
 ### 行
 
-1. **站点健康总览**：域名可用性/探测耗时、HTTP 请求量/成功率/P95、应用抓取健康、组件健康。
-2. **HTTP 请求分析**：RPS（按 Method）、平均延迟、P95/P99、状态码、5xx、慢接口 Top 10、高请求量 Endpoint。
-3. **应用运行情况**：HTTP 请求量/延迟、JVM Heap、Pod CPU/内存/Throttling。
-4. **服务调用关系**：SkyWalking 入口及站点服务映射；不伪造拓扑图或调用指标。
-5. **依赖组件**：站点关联组件的状态与专业 Dashboard 下钻链接。
-6. **运行环境**：Pod 状态、Node 分布、Pod CPU/内存、JVM 与 Pod 资源对照。
+1. **站点健康总览**（默认展开）：域名可用性/探测耗时、入口应用请求量、2xx/P95/5xx、应用指标采集状态、依赖组件状态。
+2. **HTTP 请求分析**：当前所选应用的 RPS、2xx/3xx/4xx/5xx 比例、平均延迟、P95/P99、状态码分布、慢接口 Top 10、高请求量 Endpoint、按 Method 的 RPS。
+3. **应用与 JVM**：当前所选应用的 JVM Heap（按 Pod / 内存池）。
+4. **服务调用关系**：SkyWalking Service 映射与下钻、YAML 配置依赖；不伪造实测拓扑。
+5. **依赖组件**：组件清单、专业 Dashboard 下钻；状态面板只出现在总览一次。
+6. **Kubernetes 运行环境**：Pod 状态、Node 分布、Pod CPU/内存/Throttling。JVM Heap 不在此重复。
+
+除总览外，其余 Row 默认折叠，首屏即可看到站点和依赖健康。
 
 ### 变量
 
 - `$datasource`：Prometheus 数据源。
-- `$application`：仅站点配置中的应用（多选，默认全部）。
-- `$namespace`：根据 `$application` 联动查询，并限制在站点命名空间集合内。
-- `$pod`：由应用 + Namespace 动态查询；优先使用 JVM 的 `pod` 标签，未启用 JVM 时回退到 `kube_pod_labels` 的 `label_application`。
-- `$component` / `$instance`：仅包含当前站点组件，默认全部。
+- `$app_selector`：**单选**应用实例，每个选项对应一个唯一的 Application/Namespace/Job/额外标签组合；应用级面板必须引用它。
+- `$pod`：由当前 `$app_selector` 关联的 Pod 集合产生（JVM 的 `pod` 标签，以及 `kube_pod_labels` / `pod-regex` 对应的容器序列）；JVM 与 Kubernetes 面板共享同一 Pod 归属。仅有 HTTP 的站点不会生成无用的 `$pod` 变量。
 
-应用和 Namespace 查询还会同时附带**静态站点守卫**（站点应用集合、Namespace 集合和 Job 集合）。即使通过 URL 手工覆盖变量值，也无法把其他站点的序列带入查询。默认时间范围 1 小时，刷新 30 秒。组件面板使用 YAML 中的精确 Job/Instance/标签选择器，避免多个组件变量组合产生串数据。
+不生成 `$component`、`$instance` 等无实际查询作用的变量。Dashboard 校验会拒绝未被任何面板或变量查询引用的变量。
+
+应用级查询在生成时把每个应用对象的完整精确 Selector 编译进 PromQL，并通过派生标签 `sitegen_app` 过滤 `$app_selector`。变量值使用 Grafana 的 JSON 转义格式插值，URL 手工覆盖既不能注入 PromQL，也无法匹配站点之外的应用，只会得到空结果。默认时间范围 1 小时，刷新 30 秒。
 
 ### 稳定性和安全
 
@@ -373,8 +394,19 @@ make generate-example
 - JVM 只包含已确认的 Heap 指标，GC/Threads 待真实环境验证后加入；
 - K8s 使用标准 cAdvisor / kube-state-metrics 指标，但仍应通过 `sitegen check` 在目标 Prometheus 上确认；
 - Nacos 仅验证 exporter 抓取状态，Kafka 仅展示 Broker 数，后续再扩展性能指标；
-- `application + namespace` 共同标识应用；变量可组合选择，但 PromQL 以站点应用/命名空间/Job 集合为边界，不实现任意跨站点查询；
-- 应用额外 Prometheus 标签只有在所有应用一致时才加入聚合选择器。
+- 应用由完整对象标识（application + namespace + job + 额外标签）；多应用聚合按对象逐一编译，不使用独立标签正则组合；
+- 站点级外部请求汇总只统计域名 `entryApplications`，下游应用内部调用不会重复计入；
+- Kubernetes 应用级面板要求显式 `kubernetes.podSelector`；无法建立 Pod 归属时跳过面板并输出 WARN，绝不退化为 Namespace 全量查询；
+- Windows 下 cAdvisor/Java 标签结构差异较大，`containerMatchers` 必须根据目标 Prometheus 真实标签确认；
+- Grafana 11.4 / 真实 Prometheus 的导入与查询验证必须在目标环境执行；没有真实 URL 时不能把 `generate` 或 `--skip-prometheus` 视为环境验收通过。
+
+### V1.0.1 配置迁移提示
+
+- 如果站点启用了 `http`，在域名下补充 `entryApplications`；否则会输出 WARN，并跳过站点级外部请求汇总面板。
+- 如果应用启用了 `kubernetes`，补充 `kubernetes.podSelector`；否则该应用的 Kubernetes 面板会被跳过，避免 Namespace 全量查询。
+- `containerMatchers` 必须按目标 Prometheus 的真实标签结构配置；未配置时保留 WARN 提示。
+- Dashboard 变量已由 `$application` / `$namespace` 调整为单选 `$app_selector`，并删除 `$component` / `$instance`。重新生成后旧变量不再存在。
+- 旧 YAML 不会自动改写；`sitegen validate` 只输出提示，`sitegen create/edit` 才会在确认后写入。
 
 推荐上线流程：
 
@@ -383,5 +415,5 @@ sitegen validate --site sites/<site>.yaml
 sitegen check --site sites/<site>.yaml
 sitegen build --site sites/<site>.yaml
 # 在 Grafana 导入 dashboards/<site-id>.json
-# 导入后在顶部“数据源”变量中选择 Prometheus，再检查应用/Namespace/Pod 联动与链接
+# 导入后在顶部“数据源”变量中选择 Prometheus，再检查应用实例/Pod 联动与链接
 ```

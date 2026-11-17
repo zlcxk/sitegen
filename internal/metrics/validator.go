@@ -66,6 +66,15 @@ func validateProfile(p *Profile) error {
 		if !allowedPanelTypes[pn.Panel] {
 			return fmt.Errorf("%s: panel 类型 %q 非法", path, pn.Panel)
 		}
+		switch pn.Aggregation {
+		case "", AggregationApplication:
+		case AggregationSite:
+			if p.Scope != ScopeApplication {
+				return fmt.Errorf("%s: aggregation=site 仅支持 application scope", path)
+			}
+		default:
+			return fmt.Errorf("%s: aggregation %q 非法（application/site）", path, pn.Aggregation)
+		}
 		if len(pn.Sections) == 0 {
 			return fmt.Errorf("%s: sections 不能为空", path)
 		}

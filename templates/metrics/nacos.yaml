@@ -13,7 +13,7 @@ profiles:
           max(up{%SELECTOR%})
         unit: none
         panel: stat
-        sections: [overview, component]
+        sections: [overview]
         instant: true
         thresholds:
           - color: red

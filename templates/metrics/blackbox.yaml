@@ -8,7 +8,7 @@ profiles:
     panels:
       - id: blackbox-availability
         name: 站点可用性
-        description: Blackbox 探测成功率（最近 5 分钟平均值）。
+        description: Blackbox 探测成功率（最近 5 分钟平均值）。只代表域名探测结果，不能据此断言后端应用一定异常。
         query: |
           avg_over_time(probe_success{%SELECTOR%}[5m])
         unit: percentunit
@@ -25,13 +25,13 @@ profiles:
 
       - id: blackbox-duration
         name: 外部探测耗时
-        description: Blackbox 探测总耗时，来自 probe_duration_seconds。
+        description: Blackbox 探测总耗时，统一转换为毫秒，便于与后端响应时间对比。
         query: |
-          avg(probe_duration_seconds{%SELECTOR%})
-        unit: s
-        panel: timeseries
-        legendFormat: "{{instance}}"
+          1000 * avg(probe_duration_seconds{%SELECTOR%})
+        unit: ms
+        panel: stat
         sections: [overview]
+        instant: true
         requiredMetrics:
           - probe_duration_seconds
         requiredLabels: [job, instance]

@@ -14,6 +14,8 @@ spec:
       blackbox:
         job: blackbox-sites
         instance: https://admin-test.rtdgo.tech
+      entryApplications:
+        - rtd-admin-test
 
   applications:
     - id: rtd-admin-test
@@ -35,6 +37,13 @@ spec:
         - jvm
         - kubernetes
 
+      kubernetes:
+        podSelector:
+          mode: labels
+          metric: kube_pod_labels
+          matchers:
+            label_app: rtd-admin
+
       dependencies:
         - user-center-test
         - mysql-test
@@ -53,10 +62,17 @@ spec:
       skywalking:
         service: user-center-application_test
 
+      # user-center 的 HTTP RED 指标尚未在真实环境确认，因此暂时不启用 http。
       metrics:
-        - http
         - jvm
         - kubernetes
+
+      kubernetes:
+        podSelector:
+          mode: labels
+          metric: kube_pod_labels
+          matchers:
+            label_app: user-center-application
 
       dependencies:
         - mysql-test

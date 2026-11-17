@@ -5,32 +5,37 @@ profiles:
     target: application
     scope: application
     panels:
-      - id: http-rps
-        name: HTTP RPS
-        description: 按站点所选应用和 Namespace 聚合的每秒请求数，使用 5 分钟速率。
+      # ---------------------------------------------------------------------
+      # Row 1: site health overview. These panels aggregate ONLY the
+      # applications explicitly declared as entryApplications for a domain.
+      # Internal service-to-service calls are never added to external traffic.
+      # ---------------------------------------------------------------------
+      - id: http-entry-rps
+        name: 入口应用请求量
+        description: 仅统计域名 entryApplications 显式声明的入口应用；下游应用的内部调用不会重复计入站点外部请求量。
         query: |
           sum(rate(http_server_requests_seconds_count{%SELECTOR%}[5m]))
         unit: reqps
-        panel: timeseries
-        legendFormat: RPS
-        sections: [overview, http, runtime]
+        panel: stat
+        sections: [overview]
+        aggregation: site
+        instant: true
         requiredMetrics:
           - http_server_requests_seconds_count
         requiredLabels: [application, namespace, job]
 
-      - id: http-success-rate
-        name: HTTP 成功率
-        description: 非 5xx 请求占比。4xx 保持计入成功率，与 PRD 的 5xx 错误口径一致。
+      - id: http-entry-2xx-rate
+        name: 入口应用 2xx 比例
+        description: 2xx 状态码请求占入口应用全部请求的比例；只反映 HTTP 响应状态，不代表业务操作成功。
         query: |
-          1 - (
-            sum(rate(http_server_requests_seconds_count{%SELECTOR%, status=~"5.."}[5m]))
-            /
-            clamp_min(sum(rate(http_server_requests_seconds_count{%SELECTOR%}[5m])), 1e-9)
-          )
+          sum(rate(http_server_requests_seconds_count{%SELECTOR%, status=~"2.."}[5m]))
+          /
+          clamp_min(sum(rate(http_server_requests_seconds_count{%SELECTOR%}[5m])), 1e-9)
         unit: percentunit
-        panel: timeseries
-        legendFormat: 成功率
-        sections: [overview, http]
+        panel: stat
+        sections: [overview]
+        aggregation: site
+        instant: true
         thresholds:
           - color: red
           - color: yellow
@@ -41,66 +46,182 @@ profiles:
           - http_server_requests_seconds_count
         requiredLabels: [application, namespace, job, status]
 
-      - id: http-p95
-        name: HTTP P95 延迟
-        description: 由 http_server_requests_seconds_bucket 计算的全站 P95 延迟。
+      - id: http-entry-p95
+        name: 入口应用 P95 延迟
+        description: 入口应用 HTTP 请求的 P95 延迟，单位毫秒。
         query: |
-          histogram_quantile(
+          1000 * histogram_quantile(
             0.95,
             sum by (le) (
               rate(http_server_requests_seconds_bucket{%SELECTOR%}[5m])
             )
           )
-        unit: s
-        panel: timeseries
-        legendFormat: P95
-        sections: [overview, http]
+        unit: ms
+        panel: stat
+        sections: [overview]
+        aggregation: site
+        instant: true
         requiredMetrics:
           - http_server_requests_seconds_bucket
         requiredLabels: [application, namespace, job]
 
-      - id: http-rps-by-method
-        name: 按 Method 的 RPS
-        description: OPTIONS 请求默认单独成组展示，不混入业务请求的图例。
+      - id: http-entry-5xx-rate
+        name: 入口应用 5xx 比例
+        description: 5xx 服务端错误占入口应用全部请求的比例。
         query: |
-          sum by (method) (
-            rate(http_server_requests_seconds_count{%SELECTOR%}[5m])
-          )
+          sum(rate(http_server_requests_seconds_count{%SELECTOR%, status=~"5.."}[5m]))
+          /
+          clamp_min(sum(rate(http_server_requests_seconds_count{%SELECTOR%}[5m])), 1e-9)
+        unit: percentunit
+        panel: stat
+        sections: [overview]
+        aggregation: site
+        instant: true
+        thresholds:
+          - color: green
+          - color: yellow
+            value: 0.01
+          - color: red
+            value: 0.05
+        requiredMetrics:
+          - http_server_requests_seconds_count
+        requiredLabels: [application, namespace, job, status]
+
+      # ---------------------------------------------------------------------
+      # Row 2: HTTP request analysis for the application selected by
+      # $app_selector. Each panel retains application/namespace identity.
+      # ---------------------------------------------------------------------
+      - id: http-rps
+        name: 请求量趋势
+        description: 当前所选应用实例的每秒请求数，使用 5 分钟速率。
+        query: |
+          sum(rate(http_server_requests_seconds_count{%SELECTOR%}[5m]))
         unit: reqps
         panel: timeseries
-        legendFormat: "{{method}}"
+        legendFormat: RPS
         sections: [http]
         requiredMetrics:
           - http_server_requests_seconds_count
-        requiredLabels: [application, namespace, job, method]
+        requiredLabels: [application, namespace, job]
+
+      - id: http-2xx-rate
+        name: HTTP 2xx 比例
+        description: 2xx 状态码请求占比。2xx 只代表 HTTP 层响应成功，不代表业务操作成功。
+        query: |
+          sum(rate(http_server_requests_seconds_count{%SELECTOR%, status=~"2.."}[5m]))
+          /
+          clamp_min(sum(rate(http_server_requests_seconds_count{%SELECTOR%}[5m])), 1e-9)
+        unit: percentunit
+        panel: timeseries
+        legendFormat: 2xx
+        sections: [http]
+        thresholds:
+          - color: red
+          - color: yellow
+            value: 0.95
+          - color: green
+            value: 0.99
+        requiredMetrics:
+          - http_server_requests_seconds_count
+        requiredLabels: [application, namespace, job, status]
+
+      - id: http-3xx-rate
+        name: HTTP 3xx 比例
+        description: 3xx 状态码请求占比。
+        query: |
+          sum(rate(http_server_requests_seconds_count{%SELECTOR%, status=~"3.."}[5m]))
+          /
+          clamp_min(sum(rate(http_server_requests_seconds_count{%SELECTOR%}[5m])), 1e-9)
+        unit: percentunit
+        panel: timeseries
+        legendFormat: 3xx
+        sections: [http]
+        requiredMetrics:
+          - http_server_requests_seconds_count
+        requiredLabels: [application, namespace, job, status]
+
+      - id: http-4xx-rate
+        name: HTTP 4xx 比例
+        description: 4xx 状态码请求占比，不包含在 2xx 成功口径中。
+        query: |
+          sum(rate(http_server_requests_seconds_count{%SELECTOR%, status=~"4.."}[5m]))
+          /
+          clamp_min(sum(rate(http_server_requests_seconds_count{%SELECTOR%}[5m])), 1e-9)
+        unit: percentunit
+        panel: timeseries
+        legendFormat: 4xx
+        sections: [http]
+        requiredMetrics:
+          - http_server_requests_seconds_count
+        requiredLabels: [application, namespace, job, status]
+
+      - id: http-5xx-rate
+        name: HTTP 5xx 比例
+        description: 5xx 服务端错误占全部请求的比例；无流量时未做 0 值伪造。
+        query: |
+          sum(rate(http_server_requests_seconds_count{%SELECTOR%, status=~"5.."}[5m]))
+          /
+          clamp_min(sum(rate(http_server_requests_seconds_count{%SELECTOR%}[5m])), 1e-9)
+        unit: percentunit
+        panel: timeseries
+        legendFormat: 5xx
+        sections: [http]
+        thresholds:
+          - color: green
+          - color: yellow
+            value: 0.01
+          - color: red
+            value: 0.05
+        requiredMetrics:
+          - http_server_requests_seconds_count
+        requiredLabels: [application, namespace, job, status]
 
       - id: http-avg-latency
         name: 平均响应时间
-        description: Sum / Count，单位秒。
+        description: Sum / Count，统一以毫秒展示。
         query: |
+          1000 *
           sum(rate(http_server_requests_seconds_sum{%SELECTOR%}[5m]))
           /
           clamp_min(sum(rate(http_server_requests_seconds_count{%SELECTOR%}[5m])), 1e-9)
-        unit: s
+        unit: ms
         panel: timeseries
         legendFormat: 平均
-        sections: [http, runtime]
+        sections: [http]
         requiredMetrics:
           - http_server_requests_seconds_sum
           - http_server_requests_seconds_count
         requiredLabels: [application, namespace, job]
 
+      - id: http-p95
+        name: HTTP P95 延迟
+        description: 由 http_server_requests_seconds_bucket 计算，单位毫秒。
+        query: |
+          1000 * histogram_quantile(
+            0.95,
+            sum by (le) (
+              rate(http_server_requests_seconds_bucket{%SELECTOR%}[5m])
+            )
+          )
+        unit: ms
+        panel: timeseries
+        legendFormat: P95
+        sections: [http]
+        requiredMetrics:
+          - http_server_requests_seconds_bucket
+        requiredLabels: [application, namespace, job]
+
       - id: http-p99
         name: HTTP P99 延迟
-        description: 由 histogram bucket 计算，受直方图桶边界影响。
+        description: 由 histogram bucket 计算，单位毫秒；受直方图桶边界影响。
         query: |
-          histogram_quantile(
+          1000 * histogram_quantile(
             0.99,
             sum by (le) (
               rate(http_server_requests_seconds_bucket{%SELECTOR%}[5m])
             )
           )
-        unit: s
+        unit: ms
         panel: timeseries
         legendFormat: P99
         sections: [http]
@@ -123,44 +244,23 @@ profiles:
           - http_server_requests_seconds_count
         requiredLabels: [application, namespace, job, status]
 
-      - id: http-5xx-rate
-        name: 5xx 错误率
-        description: 5xx 请求占全部请求的比例；无流量时未做 0 值伪造。
-        query: |
-          sum(rate(http_server_requests_seconds_count{%SELECTOR%, status=~"5.."}[5m]))
-          /
-          clamp_min(sum(rate(http_server_requests_seconds_count{%SELECTOR%}[5m])), 1e-9)
-        unit: percentunit
-        panel: timeseries
-        legendFormat: 5xx
-        sections: [http]
-        thresholds:
-          - color: green
-          - color: yellow
-            value: 0.01
-          - color: red
-            value: 0.05
-        requiredMetrics:
-          - http_server_requests_seconds_count
-        requiredLabels: [application, namespace, job, status]
-
       - id: http-slow-endpoints
         name: 慢接口 Top 10
-        description: 按 method + uri 计算 P95；仅保留 5 分钟内平均请求速率高于 1/60 reqps 的接口，避免低流量接口产生误导性 P95。OPTIONS 已排除。
+        description: 按 application + namespace + method + uri 计算 P95，单位毫秒；仅保留 5 分钟内平均速率高于 1/60 reqps 的接口。OPTIONS 已排除。
         query: |
           topk(10,
-            histogram_quantile(
+            1000 * histogram_quantile(
               0.95,
-              sum by (le, method, uri) (
+              sum by (le, application, namespace, method, uri) (
                 rate(http_server_requests_seconds_bucket{%SELECTOR%, method!="OPTIONS"}[5m])
               )
             )
-            and on (method, uri)
-            sum by (method, uri) (
+            and on (application, namespace, method, uri)
+            sum by (application, namespace, method, uri) (
               rate(http_server_requests_seconds_count{%SELECTOR%, method!="OPTIONS"}[5m])
             ) > 0.0166666667
           )
-        unit: s
+        unit: ms
         panel: table
         sections: [http]
         instant: true
@@ -171,10 +271,10 @@ profiles:
 
       - id: http-top-endpoints
         name: 高请求量 Endpoint
-        description: 按 method + uri 汇总请求速率 Top 10；OPTIONS 已排除。
+        description: 按 application + namespace + method + uri 汇总请求速率 Top 10；OPTIONS 已排除。
         query: |
           topk(10,
-            sum by (method, uri) (
+            sum by (application, namespace, method, uri) (
               rate(http_server_requests_seconds_count{%SELECTOR%, method!="OPTIONS"}[5m])
             )
           )
@@ -185,3 +285,18 @@ profiles:
         requiredMetrics:
           - http_server_requests_seconds_count
         requiredLabels: [application, namespace, job, method, uri]
+
+      - id: http-rps-by-method
+        name: 按 Method 的 RPS
+        description: 保留 application、namespace 和 method 维度。
+        query: |
+          sum by (application, namespace, method) (
+            rate(http_server_requests_seconds_count{%SELECTOR%}[5m])
+          )
+        unit: reqps
+        panel: timeseries
+        legendFormat: "{{application}} / {{method}}"
+        sections: [http]
+        requiredMetrics:
+          - http_server_requests_seconds_count
+        requiredLabels: [application, namespace, job, method]

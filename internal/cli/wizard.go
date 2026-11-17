@@ -34,6 +34,9 @@ func (w *Wizard) Create() (*config.Site, error) {
 	if err := w.promptApplications(site); err != nil {
 		return nil, err
 	}
+	if err := w.promptEntryApplications(site); err != nil {
+		return nil, err
+	}
 	if err := w.promptComponents(site); err != nil {
 		return nil, err
 	}
@@ -86,6 +89,9 @@ func (w *Wizard) Edit(existing *config.Site) (*config.Site, error) {
 		if err := w.promptApplications(site); err != nil {
 			return nil, err
 		}
+	}
+	if err := w.promptEntryApplications(site); err != nil {
+		return nil, err
 	}
 
 	if len(existing.Spec.Components) > 0 {
@@ -356,6 +362,43 @@ func (w *Wizard) promptComponents(site *config.Site) error {
 	}
 }
 
+// promptEntryApplications binds each domain to the applications that actually
+// serve external traffic. It is an explicit relationship, never inferred from
+// application names.
+func (w *Wizard) promptEntryApplications(site *config.Site) error {
+	if len(site.Spec.Domains) == 0 || len(site.Spec.Applications) == 0 {
+		return nil
+	}
+	labels := make([]string, 0, len(site.Spec.Applications))
+	ids := make([]string, 0, len(site.Spec.Applications))
+	for _, app := range site.Spec.Applications {
+		ids = append(ids, app.ID)
+		labels = append(labels, app.ID+"（"+app.Application+"/"+app.Namespace+"）")
+	}
+	for i := range site.Spec.Domains {
+		domain := &site.Spec.Domains[i]
+		defaults := make([]bool, len(site.Spec.Applications))
+		for _, entry := range domain.EntryApplications {
+			for j, id := range ids {
+				if id == entry {
+					defaults[j] = true
+				}
+			}
+		}
+		selected, err := w.Prompter.MultiSelect(
+			"域名 "+domain.ID+" 的入口应用（站点外部请求量只统计这些应用，可留空）",
+			labels, defaults)
+		if err != nil {
+			return err
+		}
+		domain.EntryApplications = nil
+		for _, index := range selected {
+			domain.EntryApplications = append(domain.EntryApplications, ids[index])
+		}
+	}
+	return nil
+}
+
 type dependencyOption struct {
 	ID    string
 	Label string
@@ -489,6 +532,9 @@ func (w *Wizard) printPreview(site *config.Site, issues config.Issues) {
 	fmt.Fprintln(w.Out, "域名:")
 	for _, domain := range site.Spec.Domains {
 		fmt.Fprintf(w.Out, "  - %s  %s  blackbox=%s/%s\n", domain.ID, domain.URL, domain.Blackbox.Job, domain.Blackbox.Instance)
+		if len(domain.EntryApplications) > 0 {
+			fmt.Fprintf(w.Out, "    entryApplications=%s\n", strings.Join(domain.EntryApplications, ", "))
+		}
 	}
 	fmt.Fprintln(w.Out, "应用:")
 	for _, app := range site.Spec.Applications {

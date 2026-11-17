@@ -186,12 +186,79 @@ func TestCheckerMissingRequiredLabel(t *testing.T) {
 	found := false
 	for _, check := range checks {
 		if strings.Contains(check.Name, "http_server_requests_seconds_count") &&
-			check.Status == output.Fail && strings.Contains(check.Detail, "缺少必需标签") {
+			check.Status == output.Fail && strings.Contains(check.Detail, "必需标签不完整") {
 			found = true
 		}
 	}
 	if !found {
 		t.Fatal("missing labels not reported as FAIL")
+	}
+}
+
+type selectivePromAPI struct {
+	fakePromAPI
+	series func(match string) []model.LabelSet
+}
+
+func (s *selectivePromAPI) Series(_ context.Context, match string, _, _ time.Time) ([]model.LabelSet, error) {
+	if s.series != nil {
+		return s.series(match), nil
+	}
+	return s.fakePromAPI.Series(context.Background(), match, time.Time{}, time.Time{})
+}
+
+func TestPodAssociationDoesNotIncludeUnrelatedPods(t *testing.T) {
+	reg, err := LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	site := smallSite()
+	site.Spec.Applications[0].Metrics = append(site.Spec.Applications[0].Metrics, "kubernetes")
+	site.Spec.Applications[0].Kubernetes.PodSelector = &config.PodSelector{
+		Mode:     config.PodSelectorLabels,
+		Metric:   config.DefaultPodLabelsMetric,
+		Matchers: map[string]string{"label_app": "rtd-admin"},
+	}
+	api := &selectivePromAPI{series: func(match string) []model.LabelSet {
+		switch {
+		case strings.HasPrefix(match, "kube_pod_labels"):
+			return []model.LabelSet{
+				{"namespace": "test", "pod": "rtd-admin-1", "label_app": "rtd-admin"},
+			}
+		case strings.HasPrefix(match, "container_memory_working_set_bytes"):
+			return []model.LabelSet{
+				{"namespace": "test", "pod": "rtd-admin-1"},
+				{"namespace": "test", "pod": "user-center-1"},
+				{"namespace": "test", "pod": "unrelated-worker-1"},
+			}
+		}
+		return nil
+	}}
+	checker := &Checker{
+		API:      api,
+		Site:     site,
+		Registry: reg,
+		Options: CheckOptions{
+			Lookback:    time.Hour,
+			Concurrency: 2,
+			Now:         func() time.Time { return time.Unix(1700000000, 0) },
+		},
+	}
+	checks := checker.Run(context.Background())
+	found := false
+	for _, check := range checks {
+		if check.Name == "Pod 归属/app-test/kube_pod_labels" {
+			found = true
+			if check.Status != output.Pass {
+				t.Fatalf("pod association = %s: %s", check.Status, check.Detail)
+			}
+			if !strings.Contains(check.Detail, "匹配 1 个 Pod") || !strings.Contains(check.Detail, "1 个与 cAdvisor") {
+				t.Fatalf("unexpected pod association detail: %s", check.Detail)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("pod association check missing")
 	}
 }
 

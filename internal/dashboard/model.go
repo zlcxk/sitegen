@@ -134,6 +134,7 @@ type Variable struct {
 	Name       string           `json:"name"`
 	Options    []VariableOption `json:"options,omitempty"`
 	Query      any              `json:"query"`
+	Regex      string           `json:"regex,omitempty"`
 	Refresh    int              `json:"refresh,omitempty"`
 	Sort       int              `json:"sort,omitempty"`
 	Type       string           `json:"type"`

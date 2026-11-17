@@ -82,6 +82,7 @@ func (c *Checker) Run(ctx context.Context) []output.Check {
 	tasks = append(tasks, c.domainTasks(now, lookback)...)
 	tasks = append(tasks, c.applicationTasks(now, lookback)...)
 	tasks = append(tasks, c.componentTasks(now, lookback)...)
+	tasks = append(tasks, c.variableTasks()...)
 	tasks = append(tasks, c.skipTasks()...)
 
 	results := make([]output.Check, len(tasks))
@@ -103,11 +104,6 @@ func (c *Checker) Run(ctx context.Context) []output.Check {
 		}()
 	}
 	wg.Wait()
-
-	if c.hasKubernetesWithoutJVM() {
-		results = append(results, c.check("Dashboard 变量", "Pod 选择",
-			output.Warn, "站点启用了 Kubernetes 指标但未启用 JVM；Pod 变量将回退到 kube_pod_labels，请确认 Pod 带有 application 标签"))
-	}
 	return results
 }
 
@@ -137,24 +133,66 @@ func (c *Checker) applicationTasks(now time.Time, lookback time.Duration) []chec
 		return tasks
 	}
 
-	namespaceChecked := map[string]bool{}
 	for _, app := range apps {
-		active := c.activeApplicationProfiles(app)
-		for _, profile := range active {
+		for _, profile := range c.activeApplicationProfiles(app) {
+			required, optional := profileRequirements(profile)
 			switch profile.Scope {
 			case ScopeApplication:
 				selector := ApplicationTargetSelector(app)
-				required, optional := profileRequirements(profile)
 				tasks = append(tasks, c.metricTasks("应用 "+app.ID, selector, required, optional, now, lookback)...)
+				for _, panel := range profile.Panels {
+					if panel.Aggregation == AggregationSite {
+						continue
+					}
+					query := RenderApplicationQuery(panel.Query, []config.Application{app}, false)
+					tasks = append(tasks, c.queryTask(
+						"应用/"+app.ID+"/"+profile.ID+"/"+panel.ID,
+						RenderCheckQuery(query, c.Site, ""),
+					))
+				}
 			case ScopeNamespace:
-				if namespaceChecked[app.Namespace] {
+				if app.Kubernetes.PodSelector == nil {
+					tasks = append(tasks, c.warnTask("Prometheus", "应用 "+app.ID+"/Kubernetes Pod 归属",
+						"未配置 kubernetes.podSelector；跳过应用级 Kubernetes 查询，避免纳入同 Namespace 其他应用 Pod"))
 					continue
 				}
-				namespaceChecked[app.Namespace] = true
 				selector := `namespace=` + QuoteLabelValue(app.Namespace)
-				required, optional := profileRequirements(profile)
-				tasks = append(tasks, c.metricTasks("Namespace "+app.Namespace, selector, required, optional, now, lookback)...)
+				tasks = append(tasks, c.metricTasks("应用 "+app.ID, selector, required, optional, now, lookback)...)
+				for _, panel := range profile.Panels {
+					query := RenderNamespaceQuery(panel.Query, []config.Application{app}, false)
+					tasks = append(tasks, c.queryTask(
+						"应用/"+app.ID+"/"+profile.ID+"/"+panel.ID,
+						RenderCheckQuery(query, c.Site, ""),
+					))
+				}
+				tasks = append(tasks, c.podAssociationTasks(app, now, lookback)...)
 			}
+		}
+	}
+
+	// Site-level entry application aggregates use exactly the same compiled
+	// selectors as the dashboard: only explicitly declared entry applications.
+	for _, profile := range applicationProfiles(c.Registry) {
+		var sitePanels []Panel
+		for _, panel := range profile.Panels {
+			if panel.Aggregation == AggregationSite {
+				sitePanels = append(sitePanels, panel)
+			}
+		}
+		if len(sitePanels) == 0 {
+			continue
+		}
+		entry := c.Site.EntryApplicationsWithMetric(profile.ID)
+		if len(entry) == 0 {
+			if profile.ID == "http" && len(c.Site.ApplicationsWithMetric("http")) > 0 {
+				tasks = append(tasks, c.warnTask("Prometheus", "站点/HTTP 入口应用汇总",
+					"未配置启用 HTTP 的 entryApplications；不会生成站点级外部请求汇总面板"))
+			}
+			continue
+		}
+		for _, panel := range sitePanels {
+			query := RenderApplicationQuery(panel.Query, entry, false)
+			tasks = append(tasks, c.queryTask("站点/"+profile.ID+"/"+panel.ID, RenderCheckQuery(query, c.Site, "")))
 		}
 	}
 
@@ -168,29 +206,218 @@ func (c *Checker) applicationTasks(now time.Time, lookback time.Duration) []chec
 			selector := `job=` + QuoteLabelValue(app.Prometheus.Job)
 			tasks = append(tasks, c.metricTasks("应用 "+app.ID, selector, required, optional, now, lookback)...)
 		}
-		platformSelector := `job=~` + QuoteLabelValue(AppJobsRegex(c.Site))
 		for _, panel := range auto.Panels {
-			query := RenderCheckQuery(panel.Query, c.Site, platformSelector)
-			tasks = append(tasks, c.queryTask("平台/"+panel.ID, query))
-		}
-	}
-
-	// Execute each active profile panel once using the site-wide selector.
-	seenProfiles := map[string]bool{}
-	for _, app := range apps {
-		for _, profile := range c.activeApplicationProfiles(app) {
-			if seenProfiles[profile.ID] {
-				continue
-			}
-			seenProfiles[profile.ID] = true
-			selector := profileCheckSelector(profile, c.Site)
-			for _, panel := range profile.Panels {
-				query := RenderCheckQuery(panel.Query, c.Site, selector)
-				tasks = append(tasks, c.queryTask(profile.ID+"/"+panel.ID, query))
-			}
+			query := RenderJobQuery(panel.Query, apps)
+			tasks = append(tasks, c.queryTask("平台/"+panel.ID, RenderCheckQuery(query, c.Site, "")))
 		}
 	}
 	return tasks
+}
+
+func applicationProfiles(registry *Registry) []*Profile {
+	var out []*Profile
+	for _, id := range registry.Order {
+		profile := registry.Profiles[id]
+		if profile.Auto || profile.Target != targetApplication {
+			continue
+		}
+		out = append(out, profile)
+	}
+	return out
+}
+
+func (c *Checker) podAssociationTasks(app config.Application, now time.Time, lookback time.Duration) []checkTask {
+	tasks := c.containerMatcherTasks(app, now, lookback)
+	ps := app.Kubernetes.PodSelector
+	if ps == nil {
+		return tasks
+	}
+	switch ps.Mode {
+	case config.PodSelectorLabels:
+		metric := ps.PodLabelMetric()
+		return append(tasks, checkTask{
+			category: "Prometheus",
+			name:     "Pod 归属/" + app.ID + "/" + metric,
+			run: func(ctx context.Context) output.Check {
+				exists, err := c.API.MetricExists(ctx, metric, now.Add(-7*24*time.Hour), now)
+				if err != nil {
+					return c.check("Prometheus", "Pod 归属/"+app.ID+"/"+metric, output.Fail, requestErrorDetail(err))
+				}
+				if !exists {
+					return c.check("Prometheus", "Pod 归属/"+app.ID+"/"+metric, output.Fail,
+						"Pod 归属指标 "+metric+" 不存在（近 7 天无序列）")
+				}
+				selector := `namespace=` + QuoteLabelValue(app.Namespace)
+				for _, key := range sortedKeys(ps.Matchers) {
+					selector += ", " + key + "=" + QuoteLabelValue(ps.Matchers[key])
+				}
+				series, err := c.API.Series(ctx, metric+"{"+selector+"}", now.Add(-lookback), now)
+				if err != nil {
+					return c.check("Prometheus", "Pod 归属/"+app.ID+"/"+metric, output.Fail, requestErrorDetail(err))
+				}
+				if len(series) == 0 {
+					return c.check("Prometheus", "Pod 归属/"+app.ID+"/"+metric, output.Warn,
+						fmt.Sprintf("配置的 Pod 标签在近 %s 内没有匹配序列", lookback))
+				}
+				for _, key := range sortedKeys(ps.Matchers) {
+					count := countLabel(series, key)
+					if count == 0 {
+						return c.check("Prometheus", "Pod 归属/"+app.ID+"/"+metric, output.Warn,
+							fmt.Sprintf("匹配序列 %d 条，但没有任何序列带有标签 %s；无法建立可靠的 Pod 归属，应用级 Kubernetes 面板可能无数据", len(series), key))
+					}
+				}
+				if count := countLabel(series, "pod"); count != len(series) {
+					return c.check("Prometheus", "Pod 归属/"+app.ID+"/"+metric, output.Warn,
+						fmt.Sprintf("匹配序列 %d 条，存在 pod 标签 %d 条；无法建立完整 Pod 集合", len(series), count))
+				}
+				pods := labelSet(series, "pod")
+				cadvisorSelector := `namespace=` + QuoteLabelValue(app.Namespace) + `, pod=~".+"`
+				cadvisorSeries, err := c.API.Series(ctx, "container_memory_working_set_bytes{"+cadvisorSelector+"}", now.Add(-lookback), now)
+				if err != nil {
+					return c.check("Prometheus", "Pod 归属/"+app.ID+"/"+metric, output.Fail, requestErrorDetail(err))
+				}
+				matched := 0
+				for pod := range labelSet(cadvisorSeries, "pod") {
+					if pods[pod] {
+						matched++
+					}
+				}
+				if matched == 0 {
+					return c.check("Prometheus", "Pod 归属/"+app.ID+"/"+metric, output.Warn,
+						fmt.Sprintf("匹配 %d 个 Pod，但与 cAdvisor 指标没有交集；Kubernetes 资源面板可能无数据", len(pods)))
+				}
+				return c.check("Prometheus", "Pod 归属/"+app.ID+"/"+metric, output.Pass,
+					fmt.Sprintf("匹配 %d 个 Pod，其中 %d 个与 cAdvisor 指标交集匹配", len(pods), matched))
+			},
+		})
+	case config.PodSelectorPodRegex:
+		return append(tasks, checkTask{
+			category: "Prometheus",
+			name:     "Pod 归属/" + app.ID,
+			run: func(ctx context.Context) output.Check {
+				if ps.Pod == "" {
+					return c.check("Prometheus", "Pod 归属/"+app.ID, output.Fail, "pod-regex 模式缺少 pod 正则")
+				}
+				selector := `namespace=` + QuoteLabelValue(app.Namespace) + `, pod=~` + QuoteLabelValue(ps.Pod)
+				series, err := c.API.Series(ctx, "container_memory_working_set_bytes{"+selector+"}", now.Add(-lookback), now)
+				if err != nil {
+					return c.check("Prometheus", "Pod 归属/"+app.ID, output.Fail, requestErrorDetail(err))
+				}
+				pods := labelSet(series, "pod")
+				if len(pods) == 0 {
+					return c.check("Prometheus", "Pod 归属/"+app.ID, output.Warn,
+						fmt.Sprintf("Pod 正则在近 %s 内没有匹配到 cAdvisor 序列；Deployment 滚动更新后请确认正则仍覆盖新实例", lookback))
+				}
+				return c.check("Prometheus", "Pod 归属/"+app.ID, output.Warn,
+					fmt.Sprintf("pod-regex 兼容模式匹配 %d 个 Pod；请确保正则覆盖滚动更新后的实例", len(pods)))
+			},
+		})
+	default:
+		return append(tasks, checkTask{
+			category: "Prometheus",
+			name:     "Pod 归属/" + app.ID,
+			run: func(context.Context) output.Check {
+				return c.check("Prometheus", "Pod 归属/"+app.ID, output.Fail, "podSelector.mode 非法")
+			},
+		})
+	}
+}
+
+func (c *Checker) containerMatcherTasks(app config.Application, now time.Time, lookback time.Duration) []checkTask {
+	if len(app.Kubernetes.ContainerMatchers) == 0 || !app.HasMetric("kubernetes") {
+		return nil
+	}
+	return []checkTask{{
+		category: "Prometheus",
+		name:     "容器过滤/" + app.ID,
+		run: func(ctx context.Context) output.Check {
+			selector := `namespace=` + QuoteLabelValue(app.Namespace)
+			series, err := c.API.Series(ctx, "container_memory_working_set_bytes{"+selector+"}", now.Add(-lookback), now)
+			if err != nil {
+				return c.check("Prometheus", "容器过滤/"+app.ID, output.Fail, requestErrorDetail(err))
+			}
+			if len(series) == 0 {
+				return c.check("Prometheus", "容器过滤/"+app.ID, output.Warn,
+					fmt.Sprintf("近 %s 内没有 container_memory_working_set_bytes 序列，无法核对容器过滤条件", lookback))
+			}
+			for _, key := range sortedKeys(app.Kubernetes.ContainerMatchers) {
+				want := app.Kubernetes.ContainerMatchers[key]
+				matched := 0
+				for _, labels := range series {
+					if string(labels[model.LabelName(key)]) == want {
+						matched++
+					}
+				}
+				if matched == 0 {
+					return c.check("Prometheus", "容器过滤/"+app.ID, output.Fail,
+						fmt.Sprintf("匹配序列 %d 条，但没有序列满足 %s=%q；容器过滤条件会把应用指标全部过滤为空", len(series), key, want))
+				}
+			}
+			return c.check("Prometheus", "容器过滤/"+app.ID, output.Pass,
+				fmt.Sprintf("已核对 %d 个过滤标签；Namespace 内共有 %d 条容器序列", len(app.Kubernetes.ContainerMatchers), len(series)))
+		},
+	}}
+}
+
+func (c *Checker) variableTasks() []checkTask {
+	var tasks []checkTask
+	expression := BuildPodVariableExpression(c.Site)
+	if expression == "" {
+		return tasks
+	}
+	firstApp := ""
+	if len(c.Site.Spec.Applications) > 0 {
+		firstApp = c.Site.Spec.Applications[0].ID
+	}
+	expr := strings.ReplaceAll(expression, "${app_selector:json}", QuoteLabelValue(firstApp))
+	expr = strings.ReplaceAll(expr, "$app_selector", QuoteLabelValue(firstApp))
+	tasks = append(tasks, checkTask{
+		category: "Dashboard 变量",
+		name:     "pod",
+		run: func(ctx context.Context) output.Check {
+			value, err := c.API.Query(ctx, expr)
+			if err != nil {
+				return c.check("Dashboard 变量", "pod", output.Fail,
+					"Pod 变量查询不是合法 PromQL: "+requestErrorDetail(err))
+			}
+			if value == nil || isEmptyValue(value) {
+				return c.check("Dashboard 变量", "pod", output.Warn,
+					"Pod 变量查询语法合法，但当前时间窗口没有数据")
+			}
+			return c.check("Dashboard 变量", "pod", output.Pass, "Pod 变量查询合法且返回数据")
+		},
+	})
+	return tasks
+}
+
+func (c *Checker) warnTask(category, name, detail string) checkTask {
+	return checkTask{
+		category: category,
+		name:     name,
+		run: func(context.Context) output.Check {
+			return c.check(category, name, output.Warn, detail)
+		},
+	}
+}
+
+func countLabel(series []model.LabelSet, label string) int {
+	count := 0
+	for _, labels := range series {
+		if _, ok := labels[model.LabelName(label)]; ok {
+			count++
+		}
+	}
+	return count
+}
+
+func labelSet(series []model.LabelSet, label string) map[string]bool {
+	out := map[string]bool{}
+	for _, labels := range series {
+		if value, ok := labels[model.LabelName(label)]; ok {
+			out[string(value)] = true
+		}
+	}
+	return out
 }
 
 func (c *Checker) componentTasks(now time.Time, lookback time.Duration) []checkTask {
@@ -301,41 +528,33 @@ func (c *Checker) checkMetric(ctx context.Context, target, metric, selector stri
 		return c.check("Prometheus", target+"/"+metric, output.Warn,
 			fmt.Sprintf("指标存在，但 selector 在近 %s 内没有序列", lookback))
 	}
-	var missingRequired []string
+	detail := []string{fmt.Sprintf("匹配序列：%d", len(series))}
+	var incomplete []string
 	for _, label := range required {
-		count := 0
-		for _, labels := range series {
-			if _, ok := labels[model.LabelName(label)]; ok {
-				count++
-			}
+		count := countLabel(series, label)
+		detail = append(detail, fmt.Sprintf("存在 %s 标签：%d", label, count))
+		if count < len(series) {
+			incomplete = append(incomplete, label)
 		}
-		if count == 0 {
-			missingRequired = append(missingRequired, label)
-		}
-	}
-	if len(missingRequired) > 0 {
-		return c.check("Prometheus", target+"/"+metric, output.Fail,
-			fmt.Sprintf("%d 条序列缺少必需标签: %s", len(series), strings.Join(missingRequired, ", ")))
 	}
 	var missingOptional []string
 	for _, label := range optional {
-		found := false
-		for _, labels := range series {
-			if _, ok := labels[model.LabelName(label)]; ok {
-				found = true
-				break
-			}
-		}
-		if !found {
+		count := countLabel(series, label)
+		detail = append(detail, fmt.Sprintf("可选 %s 标签：%d", label, count))
+		if count == 0 {
 			missingOptional = append(missingOptional, label)
 		}
 	}
+	summary := strings.Join(detail, "；")
+	if len(incomplete) > 0 {
+		return c.check("Prometheus", target+"/"+metric, output.Fail,
+			summary+"；原因：必需标签不完整（"+strings.Join(incomplete, ", ")+"），不能把部分标签存在当作全部通过")
+	}
 	if len(missingOptional) > 0 {
 		return c.check("Prometheus", target+"/"+metric, output.Warn,
-			fmt.Sprintf("%d 条序列，必需标签齐全；可选标签缺失: %s", len(series), strings.Join(missingOptional, ", ")))
+			summary+"；可选标签缺失（"+strings.Join(missingOptional, ", ")+"）")
 	}
-	return c.check("Prometheus", target+"/"+metric, output.Pass,
-		fmt.Sprintf("%d 条序列，必需标签齐全", len(series)))
+	return c.check("Prometheus", target+"/"+metric, output.Pass, summary+"；必需标签齐全")
 }
 
 func (c *Checker) queryTask(name, query string) checkTask {
@@ -390,21 +609,6 @@ func (c *Checker) activeComponentProfiles(component config.Component) []*Profile
 	return out
 }
 
-func (c *Checker) hasKubernetesWithoutJVM() bool {
-	hasK8s, hasJVM := false, false
-	for _, app := range c.Site.Spec.Applications {
-		for _, id := range app.Metrics {
-			switch id {
-			case "kubernetes":
-				hasK8s = true
-			case "jvm":
-				hasJVM = true
-			}
-		}
-	}
-	return hasK8s && !hasJVM
-}
-
 func profileRequirements(profile *Profile) (required, optional map[string][]string) {
 	required = map[string][]string{}
 	optional = map[string][]string{}
@@ -419,17 +623,6 @@ func profileRequirements(profile *Profile) (required, optional map[string][]stri
 		optional[metric] = sortedUnique(optional[metric])
 	}
 	return required, optional
-}
-
-func profileCheckSelector(profile *Profile, site *config.Site) string {
-	switch profile.Scope {
-	case ScopeApplication:
-		return ApplicationSelectorConcrete(site)
-	case ScopeNamespace:
-		return NamespaceSelectorConcrete(site)
-	default:
-		return ""
-	}
 }
 
 func isEmptyValue(value model.Value) bool {

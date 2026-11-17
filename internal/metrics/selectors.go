@@ -1,7 +1,6 @@
 package metrics
 
 import (
-	"regexp"
 	"sort"
 	"strings"
 
@@ -22,76 +21,10 @@ func QuoteLabelValue(value string) string {
 	return `"` + replacer.Replace(value) + `"`
 }
 
-// RegexAlternation returns an RE2 alternation of literal values.
-func RegexAlternation(values []string) string {
-	unique := uniqueSorted(values)
-	if len(unique) == 0 {
-		return "^$"
-	}
-	quoted := make([]string, 0, len(unique))
-	for _, value := range unique {
-		quoted = append(quoted, regexp.QuoteMeta(value))
-	}
-	return strings.Join(quoted, "|")
-}
-
-// AppJobsRegex returns a regex matching all configured application jobs.
-func AppJobsRegex(site *config.Site) string {
-	return RegexAlternation(applicationJobValues(site))
-}
-
-// SiteNamespacesRegex returns a regex matching all site namespaces.
-func SiteNamespacesRegex(site *config.Site) string {
-	return RegexAlternation(applicationNamespaceValues(site))
-}
-
-// PromRegexContent escapes a regex alternation for placement inside a quoted
-// PromQL string literal.
-func PromRegexContent(values []string) string {
-	quoted := QuoteLabelValue(RegexAlternation(values))
-	return quoted[1 : len(quoted)-1]
-}
-
-// ApplicationSelector renders the selector used by dashboard application
-// panels. The static site guards are ANDed with the Dashboard variables so an
-// arbitrary URL-supplied variable value cannot pull in another site's series.
-func ApplicationSelector(site *config.Site) string {
-	parts := []string{
-		`application=~"$application"`,
-		`application=~` + QuoteLabelValue(SiteApplicationsRegex(site)),
-		`namespace=~"$namespace"`,
-		`namespace=~` + QuoteLabelValue(SiteNamespacesRegex(site)),
-		`job=~` + QuoteLabelValue(AppJobsRegex(site)),
-	}
-	for _, label := range commonApplicationLabels(site) {
-		value := site.Spec.Applications[0].Prometheus.Labels[label]
-		parts = append(parts, label+"="+QuoteLabelValue(value))
-	}
-	return strings.Join(parts, ", ")
-}
-
-// SiteApplicationsRegex returns a regex matching configured application names.
-func SiteApplicationsRegex(site *config.Site) string {
-	return RegexAlternation(applicationNames(site))
-}
-
-// ApplicationSelectorConcrete is used by Prometheus checks and aggregates all
-// configured applications without Grafana variables.
-func ApplicationSelectorConcrete(site *config.Site) string {
-	parts := []string{
-		`application=~` + QuoteLabelValue(RegexAlternation(applicationNames(site))),
-		`namespace=~` + QuoteLabelValue(SiteNamespacesRegex(site)),
-		`job=~` + QuoteLabelValue(AppJobsRegex(site)),
-	}
-	for _, label := range commonApplicationLabels(site) {
-		value := site.Spec.Applications[0].Prometheus.Labels[label]
-		parts = append(parts, label+"="+QuoteLabelValue(value))
-	}
-	return strings.Join(parts, ", ")
-}
-
 // ApplicationTargetSelector renders an exact selector for a single app,
-// including every configured extra Prometheus label.
+// including every configured extra Prometheus label. This is the atomic unit
+// of application correlation: application, namespace, job and extra labels
+// are always kept together as one object.
 func ApplicationTargetSelector(app config.Application) string {
 	parts := []string{
 		`application=` + QuoteLabelValue(app.Application),
@@ -107,17 +40,6 @@ func ApplicationTargetSelector(app config.Application) string {
 		parts = append(parts, key+"="+QuoteLabelValue(app.Prometheus.Labels[key]))
 	}
 	return strings.Join(parts, ", ")
-}
-
-// NamespaceSelector renders the selector used by Kubernetes panels. The static
-// namespace guard prevents URL-overridden variables from leaking other sites.
-func NamespaceSelector(site *config.Site) string {
-	return `namespace=~"$namespace", namespace=~` + QuoteLabelValue(SiteNamespacesRegex(site)) + `, pod=~"$pod"`
-}
-
-// NamespaceSelectorConcrete renders a Kubernetes check selector.
-func NamespaceSelectorConcrete(site *config.Site) string {
-	return `namespace=~` + QuoteLabelValue(SiteNamespacesRegex(site)) + `, pod=~".+"`
 }
 
 // ComponentSelector renders an exact component selector.
@@ -142,29 +64,130 @@ func RenderQuery(query, selector string) string {
 	return strings.ReplaceAll(query, selectorToken, selector)
 }
 
-// AddFilter appends a matcher to the %SELECTOR% placeholder.
-func AddFilter(query, matcher string) string {
-	return strings.ReplaceAll(query, selectorToken, selectorToken+", "+matcher)
+// RenderApplicationQuery compiles an application-scope query template for a
+// set of application objects.
+//
+// Each configured application is compiled with its complete exact selector.
+// When more than one application is involved the per-application series are
+// unioned with `or`; literal label alternations are never used to simulate an
+// object relationship.
+//
+// filterByApp=true additionally restricts the result to the application chosen
+// in the $app_selector variable. A synthetic sitegen_app label is attached to
+// each series before the union, and filtered with a scalar match. Overriding
+// the variable to a value outside the site therefore yields no data instead of
+// pulling in another site's series.
+func RenderApplicationQuery(query string, apps []config.Application, filterByApp bool) string {
+	if len(apps) == 0 {
+		return query
+	}
+	if len(apps) == 1 && !filterByApp {
+		return RenderQuery(query, ApplicationTargetSelector(apps[0]))
+	}
+	return renderUnion(query, apps, filterByApp, func(metric, extra string, app config.Application) string {
+		selector := ApplicationTargetSelector(app)
+		if extra != "" {
+			selector += ", " + extra
+		}
+		return labelReplaceSeries(metric, selector, app.ID)
+	})
+}
+
+// RenderNamespaceQuery compiles a Kubernetes query template for applications
+// that declared an explicit pod ownership rule.
+func RenderNamespaceQuery(query string, apps []config.Application, filterByApp bool) string {
+	if len(apps) == 0 {
+		return query
+	}
+	return renderUnion(query, apps, filterByApp, func(metric, extra string, app config.Application) string {
+		return namespaceSeries(metric, extra, app)
+	})
+}
+
+// RenderJobQuery compiles a job-scope query (the `up` metric) for a set of
+// applications. Only the job label is used here because scrape targets are not
+// required to carry application or namespace labels.
+func RenderJobQuery(query string, apps []config.Application) string {
+	var withJob []config.Application
+	for _, app := range apps {
+		if app.Prometheus.Job != "" {
+			withJob = append(withJob, app)
+		}
+	}
+	if len(withJob) == 0 {
+		return query
+	}
+	if len(withJob) == 1 {
+		return RenderQuery(query, `job=`+QuoteLabelValue(withJob[0].Prometheus.Job))
+	}
+	return renderUnion(query, withJob, false, func(metric, extra string, app config.Application) string {
+		selector := `job=` + QuoteLabelValue(app.Prometheus.Job)
+		if extra != "" {
+			selector += ", " + extra
+		}
+		return metric + "{" + selector + "}"
+	})
+}
+
+// BuildPodVariableExpression returns a PromQL expression whose pod label
+// values are restricted to the application selected by $app_selector. It is
+// used inside a Grafana label_values() variable query.
+func BuildPodVariableExpression(site *config.Site) string {
+	if site == nil {
+		return ""
+	}
+	var exprs []string
+	for _, app := range site.Spec.Applications {
+		// The pod variable is only used by JVM and Kubernetes panels. HTTP-only
+		// applications do not reference it, so they must not create a
+		// decorative variable.
+		if app.HasMetric("jvm") {
+			exprs = append(exprs, labelReplaceSeries("jvm_memory_used_bytes", ApplicationTargetSelector(app), app.ID))
+		}
+		if !app.HasMetric("kubernetes") || app.Kubernetes.PodSelector == nil {
+			continue
+		}
+		ps := app.Kubernetes.PodSelector
+		switch ps.Mode {
+		case config.PodSelectorLabels:
+			selector := `namespace=` + QuoteLabelValue(app.Namespace)
+			for _, key := range sortedKeys(ps.Matchers) {
+				selector += ", " + key + "=" + QuoteLabelValue(ps.Matchers[key])
+			}
+			exprs = append(exprs, labelReplaceSeries(ps.PodLabelMetric(), selector, app.ID))
+		case config.PodSelectorPodRegex:
+			if ps.Pod == "" {
+				continue
+			}
+			selector := `namespace=` + QuoteLabelValue(app.Namespace) + `, pod=~` + QuoteLabelValue(ps.Pod)
+			exprs = append(exprs, labelReplaceSeries("container_memory_working_set_bytes", selector, app.ID))
+		}
+	}
+	if len(exprs) == 0 {
+		return ""
+	}
+	union := exprs[0]
+	if len(exprs) > 1 {
+		union = "(" + strings.Join(exprs, " or ") + ")"
+	}
+	return filterByAppSelector(union)
 }
 
 // RenderCheckQuery substitutes Grafana variables with deterministic values for
 // Prometheus validation. It must not be used to generate dashboards.
 func RenderCheckQuery(query string, site *config.Site, selector string) string {
 	out := RenderQuery(query, selector)
-	appRegex := PromRegexContent(applicationNames(site))
-	namespaceRegex := PromRegexContent(applicationNamespaceValues(site))
-	jobRegex := PromRegexContent(applicationJobValues(site))
+	firstApp := ""
+	if site != nil && len(site.Spec.Applications) > 0 {
+		firstApp = site.Spec.Applications[0].ID
+	}
 	replacements := map[string]string{
-		"${application}":     appRegex,
-		"$application":       appRegex,
-		"${namespace}":       namespaceRegex,
-		"$namespace":         namespaceRegex,
-		"${pod}":             ".+",
-		"$pod":               ".+",
-		"${app_jobs}":        jobRegex,
-		"$app_jobs":          jobRegex,
-		"${site_namespaces}": namespaceRegex,
-		"$site_namespaces":   namespaceRegex,
+		"${pod:json}":          QuoteLabelValue(".+"),
+		"${pod}":               ".+",
+		"$pod":                 ".+",
+		"${app_selector:json}": QuoteLabelValue(firstApp),
+		"${app_selector}":      firstApp,
+		"$app_selector":        firstApp,
 	}
 	for token, value := range replacements {
 		out = strings.ReplaceAll(out, token, value)
@@ -172,66 +195,170 @@ func RenderCheckQuery(query string, site *config.Site, selector string) string {
 	return out
 }
 
-func applicationJobValues(site *config.Site) []string {
-	jobs := make([]string, 0, len(site.Spec.Applications))
-	for _, app := range site.Spec.Applications {
-		if app.Prometheus.Job != "" {
-			jobs = append(jobs, app.Prometheus.Job)
+// renderUnion rewrites every metric{...}[range] region that contains
+// %SELECTOR% into a union of per-application series expressions.
+func renderUnion(query string, apps []config.Application, filterByApp bool, build func(metric, extra string, app config.Application) string) string {
+	for {
+		idx := strings.Index(query, selectorToken)
+		if idx < 0 {
+			return query
 		}
-	}
-	return jobs
-}
-
-func applicationNamespaceValues(site *config.Site) []string {
-	namespaces := make([]string, 0, len(site.Spec.Applications))
-	for _, app := range site.Spec.Applications {
-		if app.Namespace != "" {
-			namespaces = append(namespaces, app.Namespace)
+		left := strings.LastIndex(query[:idx], "{")
+		if left < 0 || strings.Contains(query[left:idx], "}") {
+			return query
 		}
-	}
-	return namespaces
-}
-
-func applicationNames(site *config.Site) []string {
-	names := make([]string, 0, len(site.Spec.Applications))
-	for _, app := range site.Spec.Applications {
-		names = append(names, app.Application)
-	}
-	return names
-}
-
-func commonApplicationLabels(site *config.Site) []string {
-	if len(site.Spec.Applications) == 0 {
-		return nil
-	}
-	var candidates []string
-	for key := range site.Spec.Applications[0].Prometheus.Labels {
-		if !reservedAppLabel(key) {
-			candidates = append(candidates, key)
+		// Find the metric selector's closing brace, skipping braces that belong
+		// to Grafana variable expressions such as ${pod:json}. A naive
+		// strings.Index(query[idx:], "}") would stop at the variable's brace and
+		// produce malformed PromQL.
+		right := selectorClosingBrace(query, idx)
+		if right < 0 {
+			return query
 		}
-	}
-	sort.Strings(candidates)
-	var common []string
-	for _, key := range candidates {
-		value := site.Spec.Applications[0].Prometheus.Labels[key]
-		all := true
-		for _, app := range site.Spec.Applications[1:] {
-			v, ok := app.Prometheus.Labels[key]
-			if !ok || v != value {
-				all = false
-				break
+		mstart := left
+		for mstart > 0 && isMetricNameChar(query[mstart-1]) {
+			mstart--
+		}
+		metric := query[mstart:left]
+		if metric == "" {
+			return query
+		}
+		inside := strings.ReplaceAll(query[left+1:right], selectorToken, "")
+		extra := strings.TrimSpace(inside)
+		extra = strings.TrimPrefix(extra, ",")
+		extra = strings.TrimSpace(extra)
+
+		end := right + 1
+		rangeText := ""
+		if end < len(query) && query[end] == '[' {
+			if close := strings.Index(query[end:], "]"); close >= 0 {
+				rangeText = query[end : end+close+1]
+				end += close + 1
 			}
 		}
-		if all {
-			common = append(common, key)
+
+		parts := make([]string, 0, len(apps))
+		for _, app := range apps {
+			parts = append(parts, build(metric, extra, app))
+		}
+		if len(parts) == 0 {
+			return query
+		}
+		union := parts[0]
+		if len(parts) > 1 {
+			union = "(" + strings.Join(parts, " or ") + ")"
+		}
+		if filterByApp {
+			union = filterByAppSelector(union)
+		}
+
+		var replacement string
+		if rangeText != "" {
+			base := strings.TrimSuffix(rangeText, "]")
+			if !strings.Contains(base, ":") {
+				base += ":"
+			}
+			replacement = "(" + union + ")" + base + "]"
+		} else {
+			replacement = "(" + union + ")"
+		}
+		query = query[:mstart] + replacement + query[end:]
+	}
+}
+
+func namespaceSeries(metric, extra string, app config.Application) string {
+	selector := `namespace=` + QuoteLabelValue(app.Namespace) + `, pod=~${pod:json}`
+	if extra != "" {
+		selector += ", " + extra
+	}
+	for _, key := range sortedKeys(app.Kubernetes.ContainerMatchers) {
+		selector += ", " + key + "=" + QuoteLabelValue(app.Kubernetes.ContainerMatchers[key])
+	}
+	if app.Kubernetes.PodSelector == nil {
+		return labelReplaceSeries(metric, selector, app.ID)
+	}
+	switch app.Kubernetes.PodSelector.Mode {
+	case config.PodSelectorPodRegex:
+		if app.Kubernetes.PodSelector.Pod != "" {
+			selector += `, pod=~` + QuoteLabelValue(app.Kubernetes.PodSelector.Pod)
+		}
+		return labelReplaceSeries(metric, selector, app.ID)
+	default:
+		ownerSelector := `namespace=` + QuoteLabelValue(app.Namespace)
+		for _, key := range sortedKeys(app.Kubernetes.PodSelector.Matchers) {
+			ownerSelector += ", " + key + "=" + QuoteLabelValue(app.Kubernetes.PodSelector.Matchers[key])
+		}
+		owner := labelReplaceSeries(app.Kubernetes.PodSelector.PodLabelMetric(), ownerSelector, app.ID)
+		// kube_pod_labels can expose more than one series per pod. Reduce the
+		// owner set to exactly one series per pod before the join; otherwise
+		// the multiplication would inflate CPU/memory by the number of owner
+		// series. `and` cannot carry group_left labels, so use * with value 1.
+		owner = "max by (namespace, pod, sitegen_app) (" + owner + ")"
+		return "(" + metric + "{" + selector + "} * on (namespace, pod) group_left(sitegen_app) " + owner + ")"
+	}
+}
+
+func labelReplaceSeries(metric, selector, appID string) string {
+	return "label_replace(" + metric + "{" + selector + "}, " + QuoteLabelValue(config.SitegenAppLabel) +
+		", " + QuoteLabelValue(appID) + ", \"\", \"\")"
+}
+
+func filterByAppSelector(expr string) string {
+	// ${app_selector:json} is Grafana's JSON escaping format. It emits a
+	// properly quoted, escaped PromQL string literal, so a URL-overridden
+	// variable value cannot break out of the string and inject PromQL. The
+	// value is still matched against generated sitegen_app IDs, so an unknown
+	// value simply yields no data.
+	return "(" + expr + ") * on (" + config.SitegenAppLabel + ") group_left " +
+		"label_replace(vector(1), " + QuoteLabelValue(config.SitegenAppLabel) + ", ${app_selector:json}, \"\", \"\")"
+}
+
+// selectorClosingBrace returns the index of the metric selector's closing
+// brace, skipping quoted strings and ${...} Grafana variable expressions.
+func selectorClosingBrace(query string, start int) int {
+	for i := start; i < len(query); i++ {
+		switch query[i] {
+		case '"':
+			for i++; i < len(query); i++ {
+				if query[i] == '\\' {
+					i++
+					continue
+				}
+				if query[i] == '"' {
+					break
+				}
+			}
+		case '$':
+			if i+1 < len(query) && query[i+1] == '{' {
+				depth := 0
+				for j := i + 1; j < len(query); j++ {
+					switch query[j] {
+					case '{':
+						depth++
+					case '}':
+						depth--
+						if depth == 0 {
+							i = j
+							j = len(query)
+						}
+					}
+				}
+			}
+		case '}':
+			return i
 		}
 	}
-	return common
+	return -1
+}
+
+func isMetricNameChar(ch byte) bool {
+	return ch == '_' || ch == ':' ||
+		(ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9')
 }
 
 func reservedAppLabel(label string) bool {
 	switch label {
-	case "application", "namespace", "job", "instance":
+	case "application", "namespace", "job", "instance", config.SitegenAppLabel:
 		return true
 	default:
 		return false
@@ -245,18 +372,4 @@ func sortedKeys(m map[string]string) []string {
 	}
 	sort.Strings(keys)
 	return keys
-}
-
-func uniqueSorted(values []string) []string {
-	seen := map[string]bool{}
-	out := make([]string, 0, len(values))
-	for _, value := range values {
-		if value == "" || seen[value] {
-			continue
-		}
-		seen[value] = true
-		out = append(out, value)
-	}
-	sort.Strings(out)
-	return out
 }

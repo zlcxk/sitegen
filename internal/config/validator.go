@@ -58,10 +58,11 @@ type TemplateInfo struct {
 type Resolver func(profileID string) (TemplateInfo, bool)
 
 var (
-	slugRE      = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,33}[a-z0-9])?$`)
-	labelNameRE = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
-	uidRE       = regexp.MustCompile(`^[A-Za-z0-9_-]{1,40}$`)
-	placeholder = regexp.MustCompile(`\{([a-zA-Z]+)\}`)
+	slugRE       = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,33}[a-z0-9])?$`)
+	labelNameRE  = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
+	metricNameRE = regexp.MustCompile(`^[a-zA-Z_:][a-zA-Z0-9_:]*$`)
+	uidRE        = regexp.MustCompile(`^[A-Za-z0-9_-]{1,40}$`)
+	placeholder  = regexp.MustCompile(`\{([a-zA-Z]+)\}`)
 )
 
 // ValidateSlug reports whether an object ID is safe and stable.
@@ -118,6 +119,12 @@ func Validate(site *Site, resolve Resolver) Issues {
 		idPaths[id] = path
 	}
 
+	configuredApps := map[string]Application{}
+	for _, app := range site.Spec.Applications {
+		if app.ID != "" {
+			configuredApps[app.ID] = app
+		}
+	}
 	if len(site.Spec.Domains) == 0 {
 		add(SeverityError, "spec.domains", "至少需要配置一个域名")
 	}
@@ -135,6 +142,39 @@ func Validate(site *Site, resolve Resolver) Issues {
 		}
 		if d.Blackbox.Instance == "" {
 			add(SeverityError, base+".blackbox.instance", "不能为空")
+		}
+		seenEntry := map[string]bool{}
+		for j, entryID := range d.EntryApplications {
+			path := fmt.Sprintf("%s.entryApplications[%d]", base, j)
+			if entryID == "" {
+				add(SeverityError, path, "入口应用 ID 不能为空")
+				continue
+			}
+			if seenEntry[entryID] {
+				add(SeverityError, path, "入口应用 %q 重复", entryID)
+				continue
+			}
+			seenEntry[entryID] = true
+			app, ok := configuredApps[entryID]
+			if !ok {
+				add(SeverityError, path, "入口应用 %q 不存在于 spec.applications", entryID)
+				continue
+			}
+			if !app.HasMetric("http") {
+				add(SeverityWarning, path, "入口应用 %q 未启用 HTTP 指标模板；不会计入站点外部请求汇总", entryID)
+			}
+		}
+	}
+	if len(configuredApps) > 0 && len(site.ApplicationsWithMetric("http")) > 0 {
+		hasHTTPEntry := false
+		for _, app := range site.EntryApplicationsWithMetric("http") {
+			if app.ID != "" {
+				hasHTTPEntry = true
+				break
+			}
+		}
+		if !hasHTTPEntry {
+			add(SeverityWarning, "spec.domains", "站点启用了 HTTP 指标但没有配置启用 HTTP 的 entryApplications；将不会生成站点级外部请求汇总面板。请在域名下显式声明入口应用。")
 		}
 	}
 
@@ -184,6 +224,7 @@ func Validate(site *Site, resolve Resolver) Issues {
 			}
 			validateExtraLabels(app.Prometheus.Labels, base+".prometheus.labels", add)
 		}
+		validateApplicationKubernetes(app, base+".kubernetes", add)
 		if app.Skywalking.Service == "" {
 			add(SeverityError, base+".skywalking.service", "不能为空；留空时会自动生成 {application}_{namespace}")
 		} else if first, ok := services[app.Skywalking.Service]; ok {
@@ -326,8 +367,76 @@ func validateExtraLabels(labels map[string]string, path string, add func(Severit
 		if key == "job" || key == "instance" {
 			add(SeverityError, labelPath, "job/instance 使用专用字段配置，不允许重复出现在 labels 中")
 		}
+		if key == SitegenAppLabel {
+			add(SeverityError, labelPath, "sitegen_app 为生成器保留标签，不允许配置")
+		}
 		if value == "" {
 			add(SeverityError, labelPath, "标签值不能为空")
+		}
+	}
+}
+
+func validateApplicationKubernetes(app Application, path string, add func(Severity, string, string, ...any)) {
+	k8sEnabled := app.HasMetric("kubernetes")
+	if !k8sEnabled {
+		if app.Kubernetes.PodSelector != nil {
+			add(SeverityWarning, path+".podSelector", "应用未启用 kubernetes 指标模板，podSelector 不会生效")
+		}
+		if len(app.Kubernetes.ContainerMatchers) > 0 {
+			add(SeverityWarning, path+".containerMatchers", "应用未启用 kubernetes 指标模板，containerMatchers 不会生效")
+		}
+		return
+	}
+	if app.Kubernetes.PodSelector == nil {
+		add(SeverityWarning, path+".podSelector",
+			"未配置 Pod 归属规则；将跳过该应用的 Kubernetes 应用级面板，避免把 Namespace 中其他应用 Pod 计入统计")
+	} else {
+		ps := app.Kubernetes.PodSelector
+		switch ps.Mode {
+		case PodSelectorLabels:
+			if ps.Metric != "" && !metricNameRE.MatchString(ps.Metric) {
+				add(SeverityError, path+".podSelector.metric", "不是合法的 Prometheus 指标名")
+			}
+			if len(ps.Matchers) == 0 {
+				add(SeverityError, path+".podSelector.matchers", "labels 模式必须提供至少一个标签匹配条件")
+			}
+			for _, key := range sortedMapKeys(ps.Matchers) {
+				if !labelNameRE.MatchString(key) {
+					add(SeverityError, path+".podSelector.matchers."+key, "不是合法的 Prometheus 标签名")
+				}
+				if key == SitegenAppLabel {
+					add(SeverityError, path+".podSelector.matchers."+key, "sitegen_app 为生成器保留标签，不允许配置")
+				}
+				if ps.Matchers[key] == "" {
+					add(SeverityError, path+".podSelector.matchers."+key, "标签值不能为空")
+				}
+			}
+		case PodSelectorPodRegex:
+			if ps.Pod == "" {
+				add(SeverityError, path+".podSelector.pod", "pod-regex 模式必须提供 pod 正则")
+			} else if _, err := regexp.Compile(ps.Pod); err != nil {
+				add(SeverityError, path+".podSelector.pod", "正则非法: %v", err)
+			} else {
+				add(SeverityWarning, path+".podSelector",
+					"pod-regex 兼容模式依赖 Pod 名称；Deployment 滚动更新后名称会变化，请确保正则能覆盖新实例")
+			}
+		default:
+			add(SeverityError, path+".podSelector.mode", "必须为 labels 或 pod-regex")
+		}
+	}
+	if len(app.Kubernetes.ContainerMatchers) == 0 {
+		add(SeverityWarning, path+".containerMatchers",
+			"未配置容器过滤条件；Pod CPU/内存可能包含 Pause 容器或 Pod 父级 cgroup 序列，请用 sitegen check 核对")
+	}
+	for _, key := range sortedMapKeys(app.Kubernetes.ContainerMatchers) {
+		if !labelNameRE.MatchString(key) {
+			add(SeverityError, path+".containerMatchers."+key, "不是合法的 Prometheus 标签名")
+		}
+		if key == SitegenAppLabel {
+			add(SeverityError, path+".containerMatchers."+key, "sitegen_app 为生成器保留标签，不允许配置")
+		}
+		if app.Kubernetes.ContainerMatchers[key] == "" {
+			add(SeverityError, path+".containerMatchers."+key, "标签值不能为空")
 		}
 	}
 }
@@ -368,6 +477,16 @@ func (l Links) Validate(path string, add func(Severity, string, string, ...any))
 			add(SeverityError, path+"."+tmpl.name, "%v", err)
 			anyIssue = true
 		}
+		if !strings.Contains(tmpl.raw, "{service}") && !strings.Contains(tmpl.raw, "{application}") {
+			add(SeverityWarning, path+"."+tmpl.name,
+				"模板未包含 {service} 或 {application}；无法定位到具体应用的页面，将只显示通用 UI 入口")
+			anyIssue = true
+		}
+	}
+	if l.SkywalkingServiceURLTemplate != "" || l.SkywalkingEndpointURLTemplate != "" {
+		add(SeverityWarning, path+".skywalkingServiceURLTemplate",
+			"SkyWalking URL 模板只做了语法校验；必须使用目标 SkyWalking UI 版本（如 10.4）实际打开 Service/Endpoint 页面验证")
+		anyIssue = true
 	}
 	for _, typ := range sortedMapKeys(l.ComponentDashboards) {
 		uid := l.ComponentDashboards[typ]

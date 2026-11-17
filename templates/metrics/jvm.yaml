@@ -7,26 +7,25 @@ profiles:
     panels:
       - id: jvm-heap-by-pod
         name: JVM Heap（按 Pod）
-        description: 仅使用已确认的 jvm_memory_used_bytes；按 pod 展示 heap 使用量。其他 JVM 指标需在真实 Prometheus 中确认后再加入模板。
+        description: 仅使用已确认的 jvm_memory_used_bytes；按当前应用和 $pod 筛选，展示每个 Pod 的 heap 使用量。其他 JVM 指标需在真实 Prometheus 中确认后再加入模板。
         query: |
           sum by (pod) (
-            jvm_memory_used_bytes{%SELECTOR%, area="heap"}
+            jvm_memory_used_bytes{%SELECTOR%, area="heap", pod=~${pod:json}}
           )
         unit: bytes
         panel: timeseries
         legendFormat: "{{pod}}"
-        sections: [runtime, environment]
+        sections: [runtime]
         requiredMetrics:
           - jvm_memory_used_bytes
-        requiredLabels: [application, namespace, job, area]
-        optionalLabels: [pod]
+        requiredLabels: [application, namespace, job, area, pod]
 
       - id: jvm-heap-by-pool
         name: JVM Heap（按内存池）
-        description: jvm_memory_used_bytes 按 pod 和 id 展示 heap 内存池；用于观察池间分布。
+        description: jvm_memory_used_bytes 按 pod 和内存池 id 展示 heap 分布；与 Pod 总览使用相同的应用和 Pod 归属。
         query: |
           sum by (pod, id) (
-            jvm_memory_used_bytes{%SELECTOR%, area="heap"}
+            jvm_memory_used_bytes{%SELECTOR%, area="heap", pod=~${pod:json}}
           )
         unit: bytes
         panel: timeseries
@@ -34,5 +33,5 @@ profiles:
         sections: [runtime]
         requiredMetrics:
           - jvm_memory_used_bytes
-        requiredLabels: [application, namespace, job, area]
-        optionalLabels: [pod, id]
+        requiredLabels: [application, namespace, job, area, pod]
+        optionalLabels: [id]

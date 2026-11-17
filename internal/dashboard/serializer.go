@@ -57,6 +57,8 @@ func Write(d *Dashboard, path string) error {
 	return nil
 }
 
+var dashboardVarRE = regexp.MustCompile(`\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?`)
+
 // Validate performs structural and layout checks required before a dashboard
 // can be written or imported.
 func Validate(d *Dashboard) error {
@@ -79,30 +81,16 @@ func Validate(d *Dashboard) error {
 		return fmt.Errorf("Dashboard 至少需要一个面板或 Row")
 	}
 
-	varNames := map[string]bool{}
-	hasDatasourceVar := false
-	for _, variable := range d.Templating.List {
-		if variable.Name == "" {
-			return fmt.Errorf("Dashboard 变量名不能为空")
-		}
-		if varNames[variable.Name] {
-			return fmt.Errorf("Dashboard 变量 %q 重复", variable.Name)
-		}
-		varNames[variable.Name] = true
-		if variable.Name == datasourceVarName {
-			hasDatasourceVar = true
-		}
-		if variable.Query == nil {
-			return fmt.Errorf("Dashboard 变量 %q 的 query 不能为空", variable.Name)
-		}
-	}
-	if !hasDatasourceVar {
-		return fmt.Errorf("Dashboard 缺少 %s 数据源变量", datasourceVarName)
-	}
-
 	ids := map[int]bool{}
+	if err := validatePanelList(d.Panels, ids); err != nil {
+		return err
+	}
+	return validateVariables(d)
+}
+
+func validatePanelList(panels []Panel, ids map[int]bool) error {
 	occupied := map[[2]int]int{}
-	for _, panel := range d.Panels {
+	for _, panel := range panels {
 		if panel.ID <= 0 {
 			return fmt.Errorf("面板 %q 的 ID 必须大于 0", panel.Title)
 		}
@@ -134,6 +122,9 @@ func Validate(d *Dashboard) error {
 			if panel.Collapsed == nil {
 				return fmt.Errorf("Row %q 缺少 collapsed 字段", panel.Title)
 			}
+			if err := validatePanelList(*panel.Panels, ids); err != nil {
+				return fmt.Errorf("Row %q: %w", panel.Title, err)
+			}
 		case "text":
 			content, _ := panel.Options["content"].(string)
 			if strings.TrimSpace(content) == "" {
@@ -159,6 +150,87 @@ func Validate(d *Dashboard) error {
 			}
 		default:
 			return fmt.Errorf("面板 %q 使用了不支持的类型 %q", panel.Title, panel.Type)
+		}
+	}
+	return nil
+}
+
+func validateVariables(d *Dashboard) error {
+	defined := map[string]bool{}
+	queries := map[string]string{}
+	hasDatasourceVar := false
+	for _, variable := range d.Templating.List {
+		if variable.Name == "" {
+			return fmt.Errorf("Dashboard 变量名不能为空")
+		}
+		if defined[variable.Name] {
+			return fmt.Errorf("Dashboard 变量 %q 重复", variable.Name)
+		}
+		defined[variable.Name] = true
+		if variable.Name == datasourceVarName {
+			hasDatasourceVar = true
+		}
+		if variable.Query == nil {
+			return fmt.Errorf("Dashboard 变量 %q 的 query 不能为空", variable.Name)
+		}
+		if query, ok := variable.Query.(string); ok {
+			queries[variable.Name] = query
+		}
+	}
+	if !hasDatasourceVar {
+		return fmt.Errorf("Dashboard 缺少 %s 数据源变量", datasourceVarName)
+	}
+
+	used := map[string]bool{datasourceVarName: true}
+	checkRefs := func(expr string) error {
+		for _, match := range dashboardVarRE.FindAllStringSubmatch(expr, -1) {
+			name := match[1]
+			if strings.HasPrefix(name, "__") {
+				continue
+			}
+			if !defined[name] {
+				return fmt.Errorf("查询引用了未定义的 Dashboard 变量 $%s", name)
+			}
+			used[name] = true
+		}
+		return nil
+	}
+	for name, query := range queries {
+		if err := checkRefs(query); err != nil {
+			return fmt.Errorf("变量 %q: %w", name, err)
+		}
+	}
+	if err := walkPanelQueries(d.Panels, checkRefs); err != nil {
+		return err
+	}
+	for name := range defined {
+		if !used[name] {
+			return fmt.Errorf("Dashboard 变量 %q 没有被任何面板或变量查询使用；不允许保留装饰性变量", name)
+		}
+	}
+	if defined["pod"] && !defined["app_selector"] {
+		return fmt.Errorf("变量 pod 依赖 app_selector，但 app_selector 未定义")
+	}
+	if defined["pod"] {
+		query := queries["pod"]
+		if !dashboardVarRE.MatchString(query) || !strings.Contains(query, "app_selector") {
+			return fmt.Errorf("变量 pod 必须依赖 app_selector，确保只显示当前应用关联的 Pod")
+		}
+	}
+	return nil
+}
+
+func walkPanelQueries(panels []Panel, fn func(string) error) error {
+	for _, panel := range panels {
+		for _, target := range panel.Targets {
+			if err := fn(target.Expr); err != nil {
+				return fmt.Errorf("面板 %q: %w", panel.Title, err)
+			}
+		}
+		if panel.Panels != nil {
+			if err := walkPanelQueries(*panel.Panels, fn); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

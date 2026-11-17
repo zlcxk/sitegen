@@ -7,13 +7,13 @@ profiles:
     componentTypes: [mysql]
     panels:
       - id: mysql-up
-        name: MySQL 状态
-        description: 仅使用已确认的 mysql_up。连接数、慢查询等性能指标需在目标 Prometheus 确认后才能加入模板。
+        name: MySQL 连接状态
+        description: mysql_up=1 表示 exporter 对 MySQL 的连接检查成功，不代表 SQL 性能或业务健康；连接数、慢查询等指标需在目标 Prometheus 确认后再加入模板。
         query: |
           max(mysql_up{%SELECTOR%})
         unit: none
         panel: stat
-        sections: [overview, component]
+        sections: [overview]
         instant: true
         thresholds:
           - color: red

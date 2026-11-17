@@ -54,81 +54,53 @@ func componentDashboardURL(links config.Links, component config.Component) strin
 }
 
 func buildServicePanels(site *config.Site, links config.Links) []Panel {
-	base := markdownLink("打开 SkyWalking UI", links.Skywalking)
+	if len(site.Spec.Applications) == 0 {
+		return nil
+	}
 	serviceTemplate := links.SkywalkingServiceURLTemplate
 	endpointTemplate := links.SkywalkingEndpointURLTemplate
 
-	var serviceLines []string
+	lines := []string{"### SkyWalking 服务映射", ""}
+	if links.Skywalking == "" && serviceTemplate == "" && endpointTemplate == "" {
+		lines = append(lines,
+			"未配置 SkyWalking UI 地址。以下是 YAML 中声明的 Prometheus 应用与 SkyWalking Service 映射关系；配置 `spec.links.skywalking` 后可从这里下钻。", "")
+	}
 	for _, app := range site.Spec.Applications {
-		serviceURL := expandSkywalkingURL(serviceTemplate, site, app)
-		if serviceURL == "" {
-			serviceURL = links.Skywalking
-		}
-		line := fmt.Sprintf("- `%s` (%s) → `%s`",
+		line := fmt.Sprintf("- `%s/%s` → SkyWalking Service `%s`",
 			markdownCode(app.Application), markdownCode(app.Namespace), markdownCode(app.Skywalking.Service))
-		if serviceURL != "" {
-			line += " · " + markdownLink("Service 页面", serviceURL)
+		if serviceTemplate != "" {
+			serviceURL := expandSkywalkingURL(serviceTemplate, site, app)
+			if serviceURL != "" {
+				line += " · " + markdownLink("Service 页面", serviceURL)
+			}
+		} else if links.Skywalking != "" {
+			line += " · " + markdownLink("SkyWalking UI", links.Skywalking) + "（未配置 Service URL 模板）"
 		}
-		serviceLines = append(serviceLines, line)
-	}
-
-	topology := []string{"### SkyWalking 服务拓扑", ""}
-	if base != "" {
-		topology = append(topology, base, "")
-	} else {
-		topology = append(topology, "未配置 SkyWalking UI 地址。请在 `sitegen.yaml` 或站点 `spec.links.skywalking` 中配置。", "")
-	}
-	topology = append(topology, "SkyWalking 拓扑不在本 Dashboard 中伪造；此处只提供页面入口与 YAML 声明的服务映射。")
-	if len(serviceLines) > 0 {
-		topology = append(topology, "", "**站点服务映射**", "")
-		topology = append(topology, serviceLines...)
-	}
-	if depLines := explicitDependencyLines(site); len(depLines) > 0 {
-		topology = append(topology, "", "**YAML 显式依赖（配置关系，非 SkyWalking 实测拓扑）**", "")
-		topology = append(topology, depLines...)
-	}
-
-	endpoint := []string{"### SkyWalking Endpoint 排行", ""}
-	if endpointTemplate != "" {
-		var lines []string
-		for _, app := range site.Spec.Applications {
-			u := expandSkywalkingURL(endpointTemplate, site, app)
-			if u != "" {
-				lines = append(lines, "- "+markdownCode(app.Skywalking.Service)+" · "+markdownLink("Endpoint 页面", u))
+		lines = append(lines, line)
+		if endpointTemplate != "" {
+			if endpointURL := expandSkywalkingURL(endpointTemplate, site, app); endpointURL != "" {
+				lines = append(lines, "  - "+markdownLink("Endpoint 页面", endpointURL))
 			}
 		}
-		if len(lines) == 0 {
-			endpoint = append(endpoint, "未配置可用的 Endpoint URL 模板。")
-		} else {
-			endpoint = append(endpoint, lines...)
-		}
-	} else if base != "" {
-		endpoint = append(endpoint, base, "", "未配置 `skywalkingEndpointURLTemplate`，请从 SkyWalking UI 中进入 Endpoint 排行。")
-	} else {
-		endpoint = append(endpoint, "未配置 SkyWalking UI 地址。")
+	}
+	if serviceTemplate == "" {
+		lines = append(lines, "", "未配置 `skywalkingServiceURLTemplate`；不会把 SkyWalking 首页伪装成具体 Service 页面。")
+	}
+	if endpointTemplate == "" {
+		lines = append(lines, "", "未配置 `skywalkingEndpointURLTemplate`；不会生成 Endpoint 专属链接，请从 SkyWalking Service 页面进入 Endpoint 排行。")
 	}
 	if format := defaultEndpointFormat(site); format != "" {
-		endpoint = append(endpoint, "", "YAML 声明的 Endpoint 维度格式：`"+markdownCode(format)+"`")
+		lines = append(lines, "", "YAML 声明的 Endpoint 维度格式：`"+markdownCode(format)+"`")
 	}
+	panels := []Panel{textPanel("SkyWalking 服务映射与下钻", strings.Join(lines, "\n"))}
 
-	trace := []string{"### SkyWalking 慢 Trace", ""}
-	if base != "" {
-		trace = append(trace, base, "")
+	if depLines := explicitDependencyLines(site); len(depLines) > 0 {
+		content := "### YAML 显式依赖（配置关系，非 SkyWalking 实测拓扑）\n\n" +
+			strings.Join(depLines, "\n") +
+			"\n\n本 Dashboard 不伪造调用拓扑；实际调用关系请以 SkyWalking 服务拓扑和 Trace 为准。"
+		panels = append(panels, textPanel("YAML 配置依赖", content))
 	}
-	trace = append(trace, "本版本不自动构造复杂 Trace URL；请从 SkyWalking 服务或 Endpoint 页面进入慢 Trace 查询。")
-
-	calls := []string{"### SkyWalking 服务调用量与成功率", ""}
-	if base != "" {
-		calls = append(calls, base, "")
-	}
-	calls = append(calls, "SkyWalking 调用指标没有在本 Dashboard 中伪装成 Prometheus 数据；请使用 SkyWalking 服务拓扑和指标页面查看。")
-
-	return []Panel{
-		textPanel("SkyWalking 服务拓扑", strings.Join(topology, "\n")),
-		textPanel("SkyWalking Endpoint 排行", strings.Join(endpoint, "\n")),
-		textPanel("SkyWalking 慢 Trace", strings.Join(trace, "\n")),
-		textPanel("SkyWalking 服务调用", strings.Join(calls, "\n")),
-	}
+	return panels
 }
 
 func explicitDependencyLines(site *config.Site) []string {

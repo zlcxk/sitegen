@@ -3,16 +3,16 @@ Site Observability 校验报告
 
 站点: 订单管理站点 (order-admin-test)
 配置文件: sites/examples/order-admin-test.yaml
-模板版本: 1.0.0+cefc905fb01fc2d1
-生成时间: 2026-11-17T13:45:13+08:00
+模板版本: 1.0.0+4b4761721e16116f
+生成时间: 2026-11-17T18:27:59+08:00
 Dashboard: dashboards\order-admin-test.json
 
 检查结果
 --------
-[PASS] 模板 / 指标模板注册表: 版本 1.0.0，摘要 cefc905fb01fc2d1
-[PASS] 配置 / Schema 与关联校验: 配置合法
-[SKIP] Prometheus / 数据校验: 用户通过 --skip-prometheus 跳过
+[PASS] 模板 / 指标模板注册表: 版本 1.0.0，摘要 4b4761721e16116f
+[WARN] 配置 / spec.applications[0].kubernetes.containerMatchers: 未配置容器过滤条件；Pod CPU/内存可能包含 Pause 容器或 Pod 父级 cgroup 序列，请用 sitegen check 核对
+[WARN] 配置 / spec.applications[1].kubernetes.containerMatchers: 未配置容器过滤条件；Pod CPU/内存可能包含 Pause 容器或 Pod 父级 cgroup 序列，请用 sitegen check 核对
 [PASS] Dashboard / 结构校验与原子写入: 已写入 dashboards\order-admin-test.json
 
-汇总: PASS=3 WARN=0 FAIL=0 SKIP=1
+汇总: PASS=2 WARN=2 FAIL=0 SKIP=0
 结果: OK

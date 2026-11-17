@@ -7,21 +7,46 @@ import (
 	"site-observability/internal/metrics"
 )
 
-func buildVariables(site *config.Site) []Variable {
+func buildVariables(site *config.Site, registry *metrics.Registry) []Variable {
 	vars := []Variable{datasourceVariable()}
-	apps := site.Spec.Applications
-	if len(apps) > 0 {
-		vars = append(vars, applicationVariable(site))
-		vars = append(vars, namespaceVariable(site))
-		if podVariable := buildPodVariable(site); podVariable != nil {
-			vars = append(vars, *podVariable)
-		}
+	if len(site.Spec.Applications) == 0 || !hasApplicationPanels(site, registry) {
+		return vars
 	}
-	if len(site.Spec.Components) > 0 {
-		vars = append(vars, componentVariable(site))
-		vars = append(vars, instanceVariable(site))
+	vars = append(vars, appSelectorVariable(site))
+	if podVariable := buildPodVariable(site); podVariable != nil {
+		vars = append(vars, *podVariable)
 	}
 	return vars
+}
+
+// hasApplicationPanels reports whether at least one application-scope metric
+// panel will be generated. Variables that would not affect any panel are never
+// emitted (no decorative controls).
+func hasApplicationPanels(site *config.Site, registry *metrics.Registry) bool {
+	for _, id := range registry.Order {
+		profile := registry.Profiles[id]
+		if profile.Auto || profile.Target != config.TargetApplication {
+			continue
+		}
+		apps := site.ApplicationsWithMetric(profile.ID)
+		if len(apps) == 0 {
+			continue
+		}
+		if profile.Scope == metrics.ScopeNamespace {
+			for _, app := range apps {
+				if app.Kubernetes.PodSelector != nil {
+					return true
+				}
+			}
+			continue
+		}
+		for _, panel := range profile.Panels {
+			if panel.Aggregation != metrics.AggregationSite {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func datasourceVariable() Variable {
@@ -37,171 +62,62 @@ func datasourceVariable() Variable {
 	}
 }
 
-func applicationVariable(site *config.Site) Variable {
-	names := uniqueStrings(func() []string {
-		out := make([]string, 0, len(site.Spec.Applications))
-		for _, app := range site.Spec.Applications {
-			out = append(out, app.Application)
-		}
-		return out
-	}())
-	options := make([]VariableOption, 0, len(names))
-	for _, name := range names {
-		options = append(options, VariableOption{Text: name, Value: name})
+// appSelectorVariable is a single-select custom variable. Each option value is
+// the stable configuration ID of exactly one Application object. Queries never
+// interpolate a user-controlled PromQL fragment; they compile every configured
+// application's exact selector at generation time and filter by this ID.
+func appSelectorVariable(site *config.Site) Variable {
+	options := make([]VariableOption, 0, len(site.Spec.Applications))
+	values := make([]string, 0, len(site.Spec.Applications))
+	for i, app := range site.Spec.Applications {
+		values = append(values, app.ID)
+		options = append(options, VariableOption{
+			Selected: i == 0,
+			Text:     app.Application + " / " + app.Namespace,
+			Value:    app.ID,
+		})
 	}
+	current := VariableCurrent{Selected: true, Text: site.Spec.Applications[0].Application + " / " + site.Spec.Applications[0].Namespace, Value: site.Spec.Applications[0].ID}
 	return Variable{
-		AllValue:   ".*",
-		Current:    allCurrent(),
-		Definition: strings.Join(names, ","),
+		Current:    current,
+		Definition: strings.Join(values, ","),
 		Hide:       0,
-		IncludeAll: true,
-		Label:      "应用",
-		Multi:      true,
-		Name:       "application",
+		Label:      "应用实例",
+		Multi:      false,
+		Name:       "app_selector",
 		Options:    options,
-		Query:      strings.Join(names, ","),
+		Query:      strings.Join(values, ","),
 		Type:       "custom",
 	}
 }
 
-func namespaceVariable(site *config.Site) Variable {
-	metric := ""
-	switch {
-	case anyApplicationProfile(site, "http"):
-		metric = "http_server_requests_seconds_count"
-	case anyApplicationProfile(site, "jvm"):
-		metric = "jvm_memory_used_bytes"
-	}
-	appGuard := metrics.QuoteLabelValue(metrics.SiteApplicationsRegex(site))
-	nsGuard := metrics.QuoteLabelValue(metrics.SiteNamespacesRegex(site))
-	selector := `application=~"$application", application=~` + appGuard + `, namespace=~` + nsGuard
-	query := ""
-	switch {
-	case metric != "":
-		query = "label_values(" + metric + "{" + selector + "}, namespace)"
-	case anyApplicationProfile(site, "kubernetes"):
-		query = "label_values(kube_pod_labels{namespace=~" + nsGuard + ", label_application=~\"$application\", label_application=~" + appGuard + "}, namespace)"
-	default:
-		query = "label_values({application=~\"$application\", application=~" + appGuard + ", namespace=~" + nsGuard + "}, namespace)"
-	}
-	return queryVariable("namespace", "Namespace", query, 2)
-}
-
 func buildPodVariable(site *config.Site) *Variable {
-	appGuard := metrics.QuoteLabelValue(metrics.SiteApplicationsRegex(site))
-	nsGuard := metrics.QuoteLabelValue(metrics.SiteNamespacesRegex(site))
-	appFilter := `application=~"$application", application=~` + appGuard
-	nsFilter := `namespace=~"$namespace", namespace=~` + nsGuard
-	var query string
-	switch {
-	case anyApplicationProfile(site, "jvm"):
-		query = "label_values(jvm_memory_used_bytes{" + appFilter + ", " + nsFilter + "}, pod)"
-	case anyApplicationProfile(site, "kubernetes"):
-		// cAdvisor container metrics do not carry the application label. When
-		// JVM is disabled, use kube-state-metrics pod labels as the safest
-		// available application correlation; the validation report warns about it.
-		query = "label_values(kube_pod_labels{" + nsFilter + ", label_application=~\"$application\", label_application=~" + appGuard + "}, pod)"
-	default:
+	expression := metrics.BuildPodVariableExpression(site)
+	if expression == "" {
 		return nil
 	}
-	v := queryVariable("pod", "Pod", query, 2)
-	return &v
-}
-
-func queryVariable(name, label, query string, refresh int) Variable {
-	return Variable{
+	// query_result executes arbitrary PromQL and returns the series text. A
+	// regex extracts the pod label values. label_values() only accepts series
+	// selectors, while the application guard is a binary expression.
+	query := "query_result(" + expression + ")"
+	return &Variable{
 		AllValue:   ".*",
 		Current:    allCurrent(),
 		Datasource: &Datasource{Type: "prometheus", UID: datasourceUID},
 		Definition: query,
 		Hide:       0,
 		IncludeAll: true,
-		Label:      label,
-		Multi:      true,
-		Name:       name,
+		Label:      "Pod",
+		Multi:      false,
+		Name:       "pod",
 		Query:      query,
-		Refresh:    refresh,
+		Regex:      `/pod="([^"]+)"/`,
+		Refresh:    2,
 		Sort:       1,
 		Type:       "query",
 	}
 }
 
-func componentVariable(site *config.Site) Variable {
-	options := make([]VariableOption, 0, len(site.Spec.Components))
-	values := make([]string, 0, len(site.Spec.Components))
-	for _, component := range site.Spec.Components {
-		options = append(options, VariableOption{Text: component.Name, Value: component.ID})
-		values = append(values, component.ID)
-	}
-	return Variable{
-		AllValue:   ".*",
-		Current:    allCurrent(),
-		Definition: strings.Join(values, ","),
-		Hide:       0,
-		IncludeAll: true,
-		Label:      "组件",
-		Multi:      true,
-		Name:       "component",
-		Options:    options,
-		Query:      strings.Join(values, ","),
-		Type:       "custom",
-	}
-}
-
-func instanceVariable(site *config.Site) Variable {
-	seen := map[string]bool{}
-	var options []VariableOption
-	var values []string
-	for _, component := range site.Spec.Components {
-		if component.Prometheus.Instance == "" || seen[component.Prometheus.Instance] {
-			continue
-		}
-		seen[component.Prometheus.Instance] = true
-		values = append(values, component.Prometheus.Instance)
-		options = append(options, VariableOption{
-			Text:  component.Name + " / " + component.Prometheus.Instance,
-			Value: component.Prometheus.Instance,
-		})
-	}
-	return Variable{
-		AllValue:   ".*",
-		Current:    allCurrent(),
-		Definition: strings.Join(values, ","),
-		Hide:       0,
-		IncludeAll: true,
-		Label:      "Instance",
-		Multi:      true,
-		Name:       "instance",
-		Options:    options,
-		Query:      strings.Join(values, ","),
-		Type:       "custom",
-	}
-}
-
-func anyApplicationProfile(site *config.Site, profileID string) bool {
-	for _, app := range site.Spec.Applications {
-		for _, id := range app.Metrics {
-			if id == profileID {
-				return true
-			}
-		}
-	}
-	return false
-}
-
 func allCurrent() VariableCurrent {
 	return VariableCurrent{Selected: true, Text: "All", Value: "$__all"}
-}
-
-func uniqueStrings(values []string) []string {
-	seen := map[string]bool{}
-	out := make([]string, 0, len(values))
-	for _, value := range values {
-		if value == "" || seen[value] {
-			continue
-		}
-		seen[value] = true
-		out = append(out, value)
-	}
-	return out
 }

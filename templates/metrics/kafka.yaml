@@ -13,7 +13,7 @@ profiles:
           sum(kafka_brokers{%SELECTOR%})
         unit: short
         panel: stat
-        sections: [overview, component]
+        sections: [overview]
         instant: true
         requiredMetrics:
           - kafka_brokers

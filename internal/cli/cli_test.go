@@ -300,8 +300,11 @@ func TestBuildWithPrometheus(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit = %d\nstdout:\n%s\nstderr:\n%s", code, out.String(), errOut.String())
 	}
-	if strings.Contains(out.String(), "SKIP=1") {
+	if strings.Contains(out.String(), "[SKIP] Prometheus / 数据校验") {
 		t.Fatalf("Prometheus check was skipped\n%s", out.String())
+	}
+	if strings.Contains(out.String(), "FAIL=") && !strings.Contains(out.String(), "FAIL=0") {
+		t.Fatalf("unexpected Prometheus failures\n%s", out.String())
 	}
 	if _, err := os.Stat(filepath.Join(dir, "dashboards", "order-admin-test.json")); err != nil {
 		t.Fatal(err)
