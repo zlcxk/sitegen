@@ -1,0 +1,26 @@
+# sitegen 工具配置示例。复制为 sitegen.yaml 后按环境修改。
+# 认证信息请通过环境变量提供，不要写入本文件：
+#   SITEGEN_PROMETHEUS_USERNAME / SITEGEN_PROMETHEUS_PASSWORD
+#   SITEGEN_PROMETHEUS_TOKEN
+#   SITEGEN_PROMETHEUS_TLS_CA / SITEGEN_PROMETHEUS_TLS_SKIP_VERIFY
+prometheus:
+  url: "http://prometheus.monitoring.svc:9090"
+  timeout: 15s
+  tlsCAFile: ""
+  tlsInsecureSkipVerify: false
+
+links:
+  skywalking: "http://skywalking-ui.example.com"
+  prometheus: "http://prometheus.example.com"
+  grafana: "http://grafana.example.com"
+
+  # 可选。支持 {service}、{application}、{namespace}、{site} 占位符。
+  skywalkingServiceURLTemplate: "http://skywalking-ui.example.com/service?service={service}"
+  skywalkingEndpointURLTemplate: "http://skywalking-ui.example.com/endpoint?service={service}"
+
+  # 依赖组件专业 Dashboard UID，按组件类型配置。
+  componentDashboards:
+    mysql: "mysql-overview"
+    redis: "redis-overview"
+    kafka: "kafka-overview"
+    nacos: "nacos-overview"

@@ -1,0 +1,24 @@
+version: "1.0.0"
+profiles:
+  - id: nacos-basic
+    name: Nacos Exporter 可达性
+    target: component
+    scope: component
+    componentTypes: [nacos]
+    panels:
+      - id: nacos-exporter-up
+        name: Nacos Exporter 可达性
+        description: 只使用通用的 up 指标表示 exporter 抓取是否正常，不代表 Nacos 集群完整健康状态。未确认的 Nacos 专有指标不会在本版本中虚构。
+        query: |
+          max(up{%SELECTOR%})
+        unit: none
+        panel: stat
+        sections: [overview, component]
+        instant: true
+        thresholds:
+          - color: red
+          - color: green
+            value: 1
+        requiredMetrics:
+          - up
+        requiredLabels: [job, instance]

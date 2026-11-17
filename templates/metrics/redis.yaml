@@ -1,0 +1,24 @@
+version: "1.0.0"
+profiles:
+  - id: redis-basic
+    name: Redis 基础状态
+    target: component
+    scope: component
+    componentTypes: [redis]
+    panels:
+      - id: redis-up
+        name: Redis 状态
+        description: 仅使用已确认的 redis_up。内存、命中率、连接数等指标需在目标 Prometheus 确认后再加入模板。
+        query: |
+          max(redis_up{%SELECTOR%})
+        unit: none
+        panel: stat
+        sections: [overview, component]
+        instant: true
+        thresholds:
+          - color: red
+          - color: green
+            value: 1
+        requiredMetrics:
+          - redis_up
+        requiredLabels: [job, instance]

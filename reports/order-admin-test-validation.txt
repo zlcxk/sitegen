@@ -1,0 +1,18 @@
+Site Observability 校验报告
+==========================
+
+站点: 订单管理站点 (order-admin-test)
+配置文件: sites/examples/order-admin-test.yaml
+模板版本: 1.0.0+cefc905fb01fc2d1
+生成时间: 2026-11-17T13:45:13+08:00
+Dashboard: dashboards\order-admin-test.json
+
+检查结果
+--------
+[PASS] 模板 / 指标模板注册表: 版本 1.0.0，摘要 cefc905fb01fc2d1
+[PASS] 配置 / Schema 与关联校验: 配置合法
+[SKIP] Prometheus / 数据校验: 用户通过 --skip-prometheus 跳过
+[PASS] Dashboard / 结构校验与原子写入: 已写入 dashboards\order-admin-test.json
+
+汇总: PASS=3 WARN=0 FAIL=0 SKIP=1
+结果: OK

@@ -1,0 +1,86 @@
+apiVersion: site-observability/v1
+kind: Site
+
+metadata:
+  id: order-admin-test
+  name: 订单管理站点
+  environment: test
+  description: 订单管理测试环境
+
+spec:
+  domains:
+    - id: admin
+      url: https://admin-test.rtdgo.tech
+      blackbox:
+        job: blackbox-sites
+        instance: https://admin-test.rtdgo.tech
+
+  applications:
+    - id: rtd-admin-test
+      application: rtd-admin
+      namespace: test
+
+      prometheus:
+        job: rtd-admin
+        labels:
+          application: rtd-admin
+          namespace: test
+
+      skywalking:
+        service: rtd-admin_test
+        endpointFormat: "{method}:{uri}"
+
+      metrics:
+        - http
+        - jvm
+        - kubernetes
+
+      dependencies:
+        - user-center-test
+        - mysql-test
+        - redis-test
+
+    - id: user-center-test
+      application: user-center-application
+      namespace: test
+
+      prometheus:
+        job: user-center-application
+        labels:
+          application: user-center-application
+          namespace: test
+
+      skywalking:
+        service: user-center-application_test
+
+      metrics:
+        - http
+        - jvm
+        - kubernetes
+
+      dependencies:
+        - mysql-test
+        - redis-test
+
+  components:
+    - id: mysql-test
+      name: MySQL Test
+      type: mysql
+
+      prometheus:
+        job: scrapeConfig/monitoring/mysql-exporter-test
+        instance: "10.10.100.10:3307"
+
+      metrics:
+        - mysql-basic
+
+    - id: redis-test
+      name: Redis Test
+      type: redis
+
+      prometheus:
+        job: scrapeConfig/monitoring/redis-exporter
+        instance: "redis://10.10.100.10:26379"
+
+      metrics:
+        - redis-basic

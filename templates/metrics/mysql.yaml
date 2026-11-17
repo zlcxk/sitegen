@@ -1,0 +1,24 @@
+version: "1.0.0"
+profiles:
+  - id: mysql-basic
+    name: MySQL 基础状态
+    target: component
+    scope: component
+    componentTypes: [mysql]
+    panels:
+      - id: mysql-up
+        name: MySQL 状态
+        description: 仅使用已确认的 mysql_up。连接数、慢查询等性能指标需在目标 Prometheus 确认后才能加入模板。
+        query: |
+          max(mysql_up{%SELECTOR%})
+        unit: none
+        panel: stat
+        sections: [overview, component]
+        instant: true
+        thresholds:
+          - color: red
+          - color: green
+            value: 1
+        requiredMetrics:
+          - mysql_up
+        requiredLabels: [job, instance]

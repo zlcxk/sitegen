@@ -1,0 +1,24 @@
+version: "1.0.0"
+profiles:
+  - id: platform
+    name: 平台健康
+    target: application
+    scope: job
+    auto: true
+    panels:
+      - id: app-up
+        name: 应用抓取健康
+        description: 使用 up 指标按 Prometheus job 展示站点关联应用的抓取状态；不伪造业务健康分。
+        query: |
+          min by (job) (up{%SELECTOR%})
+        unit: none
+        panel: stat
+        sections: [overview]
+        instant: true
+        thresholds:
+          - color: red
+          - color: green
+            value: 1
+        requiredMetrics:
+          - up
+        requiredLabels: [job]

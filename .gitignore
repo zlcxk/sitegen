@@ -1,0 +1,6 @@
+sitegen
+sitegen.exe
+dist/
+*.bak
+*.tmp
+.sitegen/

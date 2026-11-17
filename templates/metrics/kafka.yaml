@@ -1,0 +1,20 @@
+version: "1.0.0"
+profiles:
+  - id: kafka-basic
+    name: Kafka 基础状态
+    target: component
+    scope: component
+    componentTypes: [kafka]
+    panels:
+      - id: kafka-brokers
+        name: Kafka Broker 数
+        description: 仅展示 kafka_brokers。Broker 数量不能单独代表 Kafka 完整健康状态；Consumer Lag 需后续在真实指标确认后增强。
+        query: |
+          sum(kafka_brokers{%SELECTOR%})
+        unit: short
+        panel: stat
+        sections: [overview, component]
+        instant: true
+        requiredMetrics:
+          - kafka_brokers
+        requiredLabels: [job]

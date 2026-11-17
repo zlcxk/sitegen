@@ -1,0 +1,187 @@
+version: "1.0.0"
+profiles:
+  - id: http
+    name: HTTP RED
+    target: application
+    scope: application
+    panels:
+      - id: http-rps
+        name: HTTP RPS
+        description: 按站点所选应用和 Namespace 聚合的每秒请求数，使用 5 分钟速率。
+        query: |
+          sum(rate(http_server_requests_seconds_count{%SELECTOR%}[5m]))
+        unit: reqps
+        panel: timeseries
+        legendFormat: RPS
+        sections: [overview, http, runtime]
+        requiredMetrics:
+          - http_server_requests_seconds_count
+        requiredLabels: [application, namespace, job]
+
+      - id: http-success-rate
+        name: HTTP 成功率
+        description: 非 5xx 请求占比。4xx 保持计入成功率，与 PRD 的 5xx 错误口径一致。
+        query: |
+          1 - (
+            sum(rate(http_server_requests_seconds_count{%SELECTOR%, status=~"5.."}[5m]))
+            /
+            clamp_min(sum(rate(http_server_requests_seconds_count{%SELECTOR%}[5m])), 1e-9)
+          )
+        unit: percentunit
+        panel: timeseries
+        legendFormat: 成功率
+        sections: [overview, http]
+        thresholds:
+          - color: red
+          - color: yellow
+            value: 0.95
+          - color: green
+            value: 0.99
+        requiredMetrics:
+          - http_server_requests_seconds_count
+        requiredLabels: [application, namespace, job, status]
+
+      - id: http-p95
+        name: HTTP P95 延迟
+        description: 由 http_server_requests_seconds_bucket 计算的全站 P95 延迟。
+        query: |
+          histogram_quantile(
+            0.95,
+            sum by (le) (
+              rate(http_server_requests_seconds_bucket{%SELECTOR%}[5m])
+            )
+          )
+        unit: s
+        panel: timeseries
+        legendFormat: P95
+        sections: [overview, http]
+        requiredMetrics:
+          - http_server_requests_seconds_bucket
+        requiredLabels: [application, namespace, job]
+
+      - id: http-rps-by-method
+        name: 按 Method 的 RPS
+        description: OPTIONS 请求默认单独成组展示，不混入业务请求的图例。
+        query: |
+          sum by (method) (
+            rate(http_server_requests_seconds_count{%SELECTOR%}[5m])
+          )
+        unit: reqps
+        panel: timeseries
+        legendFormat: "{{method}}"
+        sections: [http]
+        requiredMetrics:
+          - http_server_requests_seconds_count
+        requiredLabels: [application, namespace, job, method]
+
+      - id: http-avg-latency
+        name: 平均响应时间
+        description: Sum / Count，单位秒。
+        query: |
+          sum(rate(http_server_requests_seconds_sum{%SELECTOR%}[5m]))
+          /
+          clamp_min(sum(rate(http_server_requests_seconds_count{%SELECTOR%}[5m])), 1e-9)
+        unit: s
+        panel: timeseries
+        legendFormat: 平均
+        sections: [http, runtime]
+        requiredMetrics:
+          - http_server_requests_seconds_sum
+          - http_server_requests_seconds_count
+        requiredLabels: [application, namespace, job]
+
+      - id: http-p99
+        name: HTTP P99 延迟
+        description: 由 histogram bucket 计算，受直方图桶边界影响。
+        query: |
+          histogram_quantile(
+            0.99,
+            sum by (le) (
+              rate(http_server_requests_seconds_bucket{%SELECTOR%}[5m])
+            )
+          )
+        unit: s
+        panel: timeseries
+        legendFormat: P99
+        sections: [http]
+        requiredMetrics:
+          - http_server_requests_seconds_bucket
+        requiredLabels: [application, namespace, job]
+
+      - id: http-status-codes
+        name: HTTP 状态码分布
+        description: 按 status 标签展示请求速率分布。
+        query: |
+          sum by (status) (
+            rate(http_server_requests_seconds_count{%SELECTOR%}[5m])
+          )
+        unit: reqps
+        panel: timeseries
+        legendFormat: "{{status}}"
+        sections: [http]
+        requiredMetrics:
+          - http_server_requests_seconds_count
+        requiredLabels: [application, namespace, job, status]
+
+      - id: http-5xx-rate
+        name: 5xx 错误率
+        description: 5xx 请求占全部请求的比例；无流量时未做 0 值伪造。
+        query: |
+          sum(rate(http_server_requests_seconds_count{%SELECTOR%, status=~"5.."}[5m]))
+          /
+          clamp_min(sum(rate(http_server_requests_seconds_count{%SELECTOR%}[5m])), 1e-9)
+        unit: percentunit
+        panel: timeseries
+        legendFormat: 5xx
+        sections: [http]
+        thresholds:
+          - color: green
+          - color: yellow
+            value: 0.01
+          - color: red
+            value: 0.05
+        requiredMetrics:
+          - http_server_requests_seconds_count
+        requiredLabels: [application, namespace, job, status]
+
+      - id: http-slow-endpoints
+        name: 慢接口 Top 10
+        description: 按 method + uri 计算 P95；仅保留 5 分钟内平均请求速率高于 1/60 reqps 的接口，避免低流量接口产生误导性 P95。OPTIONS 已排除。
+        query: |
+          topk(10,
+            histogram_quantile(
+              0.95,
+              sum by (le, method, uri) (
+                rate(http_server_requests_seconds_bucket{%SELECTOR%, method!="OPTIONS"}[5m])
+              )
+            )
+            and on (method, uri)
+            sum by (method, uri) (
+              rate(http_server_requests_seconds_count{%SELECTOR%, method!="OPTIONS"}[5m])
+            ) > 0.0166666667
+          )
+        unit: s
+        panel: table
+        sections: [http]
+        instant: true
+        requiredMetrics:
+          - http_server_requests_seconds_bucket
+          - http_server_requests_seconds_count
+        requiredLabels: [application, namespace, job, method, uri]
+
+      - id: http-top-endpoints
+        name: 高请求量 Endpoint
+        description: 按 method + uri 汇总请求速率 Top 10；OPTIONS 已排除。
+        query: |
+          topk(10,
+            sum by (method, uri) (
+              rate(http_server_requests_seconds_count{%SELECTOR%, method!="OPTIONS"}[5m])
+            )
+          )
+        unit: reqps
+        panel: table
+        sections: [http]
+        instant: true
+        requiredMetrics:
+          - http_server_requests_seconds_count
+        requiredLabels: [application, namespace, job, method, uri]

@@ -1,0 +1,38 @@
+version: "1.0.0"
+profiles:
+  - id: jvm
+    name: JVM Runtime
+    target: application
+    scope: application
+    panels:
+      - id: jvm-heap-by-pod
+        name: JVM Heap（按 Pod）
+        description: 仅使用已确认的 jvm_memory_used_bytes；按 pod 展示 heap 使用量。其他 JVM 指标需在真实 Prometheus 中确认后再加入模板。
+        query: |
+          sum by (pod) (
+            jvm_memory_used_bytes{%SELECTOR%, area="heap"}
+          )
+        unit: bytes
+        panel: timeseries
+        legendFormat: "{{pod}}"
+        sections: [runtime, environment]
+        requiredMetrics:
+          - jvm_memory_used_bytes
+        requiredLabels: [application, namespace, job, area]
+        optionalLabels: [pod]
+
+      - id: jvm-heap-by-pool
+        name: JVM Heap（按内存池）
+        description: jvm_memory_used_bytes 按 pod 和 id 展示 heap 内存池；用于观察池间分布。
+        query: |
+          sum by (pod, id) (
+            jvm_memory_used_bytes{%SELECTOR%, area="heap"}
+          )
+        unit: bytes
+        panel: timeseries
+        legendFormat: "{{pod}} / {{id}}"
+        sections: [runtime]
+        requiredMetrics:
+          - jvm_memory_used_bytes
+        requiredLabels: [application, namespace, job, area]
+        optionalLabels: [pod, id]

@@ -1,0 +1,24 @@
+version: "1.0.0"
+profiles:
+  - id: custom-up
+    name: 自定义组件抓取状态
+    target: component
+    scope: component
+    componentTypes: [custom]
+    panels:
+      - id: custom-up
+        name: 抓取状态
+        description: 使用通用 up 指标表示自定义组件 exporter 的抓取状态，不代表业务健康状态。
+        query: |
+          max(up{%SELECTOR%})
+        unit: none
+        panel: stat
+        sections: [overview, component]
+        instant: true
+        thresholds:
+          - color: red
+          - color: green
+            value: 1
+        requiredMetrics:
+          - up
+        requiredLabels: [job, instance]

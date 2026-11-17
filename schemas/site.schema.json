@@ -1,0 +1,276 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rtdgo.tech/schemas/site-observability/site.schema.json",
+  "title": "Site Observability Site",
+  "description": "sitegen 站点配置。加载器还会执行跨对象校验（ID 唯一、依赖引用、SkyWalking 映射、模板注册表等）。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["apiVersion", "kind", "metadata", "spec"],
+  "properties": {
+    "apiVersion": {
+      "const": "site-observability/v1"
+    },
+    "kind": {
+      "const": "Site"
+    },
+    "metadata": {
+      "$ref": "#/$defs/metadata"
+    },
+    "spec": {
+      "$ref": "#/$defs/spec"
+    }
+  },
+  "$defs": {
+    "slug": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 35,
+      "pattern": "^[a-z0-9](?:[a-z0-9-]{0,33}[a-z0-9])?$",
+      "description": "小写字母、数字和连字符；站点 ID 最长 35 字符（Dashboard UID 上限 40 字符）。"
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "environment"],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/slug"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "environment": {
+          "type": "string",
+          "minLength": 1
+        },
+        "description": {
+          "type": "string"
+        }
+      }
+    },
+    "spec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["domains"],
+      "properties": {
+        "domains": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/domain"
+          }
+        },
+        "applications": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/application"
+          }
+        },
+        "components": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/component"
+          }
+        },
+        "links": {
+          "$ref": "#/$defs/links"
+        }
+      }
+    },
+    "domain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "url", "blackbox"],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/slug"
+        },
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^https?://",
+          "description": "不允许包含用户名或密码。"
+        },
+        "blackbox": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["job", "instance"],
+          "properties": {
+            "job": {
+              "type": "string",
+              "minLength": 1
+            },
+            "instance": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      }
+    },
+    "application": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "application", "namespace", "prometheus"],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/slug"
+        },
+        "application": {
+          "type": "string",
+          "minLength": 1
+        },
+        "namespace": {
+          "type": "string",
+          "minLength": 1
+        },
+        "prometheus": {
+          "$ref": "#/$defs/applicationPrometheus"
+        },
+        "skywalking": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "service": {
+              "type": "string",
+              "minLength": 1,
+              "description": "留空时默认生成 {application}_{namespace}。"
+            },
+            "endpointFormat": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "metrics": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9](?:[a-z0-9-]{0,33}[a-z0-9])?$"
+          },
+          "uniqueItems": true
+        },
+        "dependencies": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/slug"
+          },
+          "uniqueItems": true,
+          "description": "引用其他应用或组件的稳定 ID；不允许推断。"
+        }
+      }
+    },
+    "applicationPrometheus": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["job"],
+      "properties": {
+        "job": {
+          "type": "string",
+          "minLength": 1
+        },
+        "labels": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "minLength": 1
+          },
+          "propertyNames": {
+            "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$"
+          },
+          "description": "额外标签。application、namespace 必须与字段一致；job 使用专用字段。应用不按 instance 区分。"
+        }
+      }
+    },
+    "componentPrometheus": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["job", "instance"],
+      "properties": {
+        "job": {
+          "type": "string",
+          "minLength": 1
+        },
+        "instance": {
+          "type": "string",
+          "minLength": 1
+        },
+        "labels": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "minLength": 1
+          },
+          "propertyNames": {
+            "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$"
+          },
+          "description": "额外标签。job、instance 使用专用字段。"
+        }
+      }
+    },
+    "component": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "type", "prometheus"],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/slug"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "$ref": "#/$defs/slug"
+        },
+        "prometheus": {
+          "$ref": "#/$defs/componentPrometheus"
+        },
+        "metrics": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9](?:[a-z0-9-]{0,33}[a-z0-9])?$"
+          },
+          "uniqueItems": true
+        }
+      }
+    },
+    "links": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "skywalking": {
+          "type": "string",
+          "format": "uri"
+        },
+        "prometheus": {
+          "type": "string",
+          "format": "uri"
+        },
+        "grafana": {
+          "type": "string",
+          "format": "uri"
+        },
+        "skywalkingServiceURLTemplate": {
+          "type": "string",
+          "description": "支持 {service}、{application}、{namespace}、{site} 占位符。"
+        },
+        "skywalkingEndpointURLTemplate": {
+          "type": "string",
+          "description": "支持 {service}、{application}、{namespace}、{site} 占位符。"
+        },
+        "componentDashboards": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40,
+            "pattern": "^[A-Za-z0-9_-]+$"
+          }
+        }
+      }
+    }
+  }
+}
