@@ -224,6 +224,8 @@ func Validate(site *Site, resolve Resolver) Issues {
 			}
 			validateExtraLabels(app.Prometheus.Labels, base+".prometheus.labels", add)
 		}
+		validateTargetLabels(app.Prometheus.TargetLabels, base+".prometheus.targetLabels", add)
+		validateSkywalkingUI(app.Skywalking.UI, base+".skywalking.ui", add)
 		validateApplicationKubernetes(app, base+".kubernetes", add)
 		if app.Skywalking.Service == "" {
 			add(SeverityError, base+".skywalking.service", "不能为空；留空时会自动生成 {application}_{namespace}")
@@ -388,56 +390,127 @@ func validateApplicationKubernetes(app Application, path string, add func(Severi
 		return
 	}
 	if app.Kubernetes.PodSelector == nil {
+		// Do not also warn about container matchers: no application-level
+		// Kubernetes panels will be generated at all.
 		add(SeverityWarning, path+".podSelector",
-			"未配置 Pod 归属规则；将跳过该应用的 Kubernetes 应用级面板，避免把 Namespace 中其他应用 Pod 计入统计")
-	} else {
-		ps := app.Kubernetes.PodSelector
-		switch ps.Mode {
-		case PodSelectorLabels:
-			if ps.Metric != "" && !metricNameRE.MatchString(ps.Metric) {
-				add(SeverityError, path+".podSelector.metric", "不是合法的 Prometheus 指标名")
-			}
-			if len(ps.Matchers) == 0 {
-				add(SeverityError, path+".podSelector.matchers", "labels 模式必须提供至少一个标签匹配条件")
-			}
-			for _, key := range sortedMapKeys(ps.Matchers) {
-				if !labelNameRE.MatchString(key) {
-					add(SeverityError, path+".podSelector.matchers."+key, "不是合法的 Prometheus 标签名")
-				}
-				if key == SitegenAppLabel {
-					add(SeverityError, path+".podSelector.matchers."+key, "sitegen_app 为生成器保留标签，不允许配置")
-				}
-				if ps.Matchers[key] == "" {
-					add(SeverityError, path+".podSelector.matchers."+key, "标签值不能为空")
-				}
-			}
-		case PodSelectorPodRegex:
-			if ps.Pod == "" {
-				add(SeverityError, path+".podSelector.pod", "pod-regex 模式必须提供 pod 正则")
-			} else if _, err := regexp.Compile(ps.Pod); err != nil {
-				add(SeverityError, path+".podSelector.pod", "正则非法: %v", err)
-			} else {
-				add(SeverityWarning, path+".podSelector",
-					"pod-regex 兼容模式依赖 Pod 名称；Deployment 滚动更新后名称会变化，请确保正则能覆盖新实例")
-			}
-		default:
-			add(SeverityError, path+".podSelector.mode", "必须为 labels 或 pod-regex")
+			"未配置 Pod 归属规则；应用级 Kubernetes 面板不会生成。请补充 podSelector 后重新执行 build")
+		if len(app.Kubernetes.ContainerMatchers) > 0 {
+			add(SeverityWarning, path+".containerMatchers",
+				"containerMatchers 已配置，但缺少 podSelector，当前不会生效")
 		}
+		return
 	}
+	ps := app.Kubernetes.PodSelector
+	switch ps.Mode {
+	case PodSelectorLabels:
+		if ps.Metric != "" && !metricNameRE.MatchString(ps.Metric) {
+			add(SeverityError, path+".podSelector.metric", "不是合法的 Prometheus 指标名")
+		}
+		if len(ps.Matchers) == 0 {
+			add(SeverityError, path+".podSelector.matchers", "labels 模式必须提供至少一个标签匹配条件")
+		}
+		for _, key := range sortedMapKeys(ps.Matchers) {
+			if !labelNameRE.MatchString(key) {
+				add(SeverityError, path+".podSelector.matchers."+key, "不是合法的 Prometheus 标签名")
+			}
+			if key == SitegenAppLabel {
+				add(SeverityError, path+".podSelector.matchers."+key, "sitegen_app 为生成器保留标签，不允许配置")
+			}
+			if ps.Matchers[key] == "" {
+				add(SeverityError, path+".podSelector.matchers."+key, "标签值不能为空")
+			}
+		}
+	case PodSelectorPodRegex:
+		if ps.Pod == "" {
+			add(SeverityError, path+".podSelector.pod", "pod-regex 模式必须提供 pod 正则")
+		} else if _, err := regexp.Compile(ps.Pod); err != nil {
+			add(SeverityError, path+".podSelector.pod", "正则非法: %v", err)
+		} else {
+			add(SeverityWarning, path+".podSelector",
+				"pod-regex 兼容模式依赖 Pod 名称；Deployment 滚动更新后名称会变化，请确保正则能覆盖新实例")
+		}
+	default:
+		add(SeverityError, path+".podSelector.mode", "必须为 labels 或 pod-regex")
+	}
+
 	if len(app.Kubernetes.ContainerMatchers) == 0 {
 		add(SeverityWarning, path+".containerMatchers",
-			"未配置容器过滤条件；Pod CPU/内存可能包含 Pause 容器或 Pod 父级 cgroup 序列，请用 sitegen check 核对")
+			"已配置 Pod 归属，但未配置容器过滤条件；Pod CPU/内存可能包含 Pause 容器或 Pod 父级 cgroup 序列，请用 sitegen check 核对")
+		return
 	}
-	for _, key := range sortedMapKeys(app.Kubernetes.ContainerMatchers) {
+	for index, matcher := range app.Kubernetes.ContainerMatchers {
+		matcherPath := fmt.Sprintf("%s.containerMatchers[%d]", path, index)
+		if !labelNameRE.MatchString(matcher.Name) {
+			add(SeverityError, matcherPath+".name", "不是合法的 Prometheus 标签名")
+		}
+		if matcher.Name == SitegenAppLabel {
+			add(SeverityError, matcherPath+".name", "sitegen_app 为生成器保留标签，不允许配置")
+		}
+		if matcher.Value == "" {
+			add(SeverityError, matcherPath+".value", "标签值不能为空")
+		}
+		switch matcher.EffectiveOperator() {
+		case MatchEqual, MatchNotEqual:
+		case MatchRegex, MatchNotRegex:
+			if _, err := regexp.Compile(matcher.Value); err != nil {
+				add(SeverityError, matcherPath+".value", "正则非法: %v", err)
+			}
+		default:
+			add(SeverityError, matcherPath+".operator",
+				"必须为 equal、not_equal、regex 或 not_regex")
+		}
+	}
+}
+
+func validateTargetLabels(labels map[string]string, path string, add func(Severity, string, string, ...any)) {
+	for _, key := range sortedMapKeys(labels) {
+		labelPath := path + "." + key
 		if !labelNameRE.MatchString(key) {
-			add(SeverityError, path+".containerMatchers."+key, "不是合法的 Prometheus 标签名")
+			add(SeverityError, labelPath, "不是合法的 Prometheus 标签名")
+		}
+		if key == "job" || key == "instance" {
+			add(SeverityError, labelPath, "job/instance 使用专用字段配置，不允许重复出现在 targetLabels 中")
 		}
 		if key == SitegenAppLabel {
-			add(SeverityError, path+".containerMatchers."+key, "sitegen_app 为生成器保留标签，不允许配置")
+			add(SeverityError, labelPath, "sitegen_app 为生成器保留标签，不允许配置")
 		}
-		if app.Kubernetes.ContainerMatchers[key] == "" {
-			add(SeverityError, path+".containerMatchers."+key, "标签值不能为空")
+		if strings.TrimSpace(labels[key]) == "" {
+			add(SeverityError, labelPath, "标签值不能为空")
 		}
+	}
+}
+
+func validateSkywalkingUI(ui SkywalkingUI, path string, add func(Severity, string, string, ...any)) {
+	if ui.BaseURL != "" {
+		if err := validateHTTPURL(ui.BaseURL, true); err != nil {
+			add(SeverityError, path+".baseURL", "%v", err)
+		}
+	}
+	for _, item := range []struct {
+		name string
+		raw  string
+	}{
+		{"serviceURLTemplate", ui.ServiceURLTemplate},
+		{"endpointURLTemplate", ui.EndpointURLTemplate},
+	} {
+		if item.raw == "" {
+			continue
+		}
+		if err := validateURLTemplate(item.raw); err != nil {
+			add(SeverityError, path+"."+item.name, "%v", err)
+			continue
+		}
+		if !strings.Contains(item.raw, "{service}") && !strings.Contains(item.raw, "{application}") {
+			add(SeverityWarning, path+"."+item.name,
+				"模板未包含 {service} 或 {application}；无法定位到具体应用页面")
+		}
+	}
+	if ui.BaseURL == "" && ui.ServiceURLTemplate == "" && ui.EndpointURLTemplate == "" {
+		return
+	}
+	if ui.ServiceURLTemplate != "" || ui.EndpointURLTemplate != "" {
+		add(SeverityWarning, path,
+			"SkyWalking UI URL 模板只做了语法校验；必须使用目标 SkyWalking 版本实际打开 Service/Endpoint 页面验证")
 	}
 }
 
@@ -535,6 +608,11 @@ func validateURLTemplate(raw string) error {
 // ValidateHTTPURL validates a user-facing HTTP(S) URL.
 func ValidateHTTPURL(raw string) error {
 	return validateHTTPURL(raw, false)
+}
+
+// ValidateURLTemplate validates a SkyWalking URL template and its placeholders.
+func ValidateURLTemplate(raw string) error {
+	return validateURLTemplate(raw)
 }
 
 func validateHTTPURL(raw string, allowPath bool) error {

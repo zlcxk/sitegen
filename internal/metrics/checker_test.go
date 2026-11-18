@@ -262,6 +262,182 @@ func TestPodAssociationDoesNotIncludeUnrelatedPods(t *testing.T) {
 	}
 }
 
+type capturingPromAPI struct {
+	fakePromAPI
+	matches []string
+	series  func(match string) []model.LabelSet
+}
+
+func (c *capturingPromAPI) Series(_ context.Context, match string, _, _ time.Time) ([]model.LabelSet, error) {
+	c.matches = append(c.matches, match)
+	if c.series != nil {
+		return c.series(match), nil
+	}
+	return c.fakePromAPI.Series(context.Background(), match, time.Time{}, time.Time{})
+}
+
+func TestCheckerUpSelectorUsesOnlyJobAndTargetLabels(t *testing.T) {
+	reg, err := LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	site := smallSite()
+	site.Spec.Applications[0].Prometheus.TargetLabels = map[string]string{"cluster": "test-cluster"}
+	api := &capturingPromAPI{}
+	checker := &Checker{
+		API:      api,
+		Site:     site,
+		Registry: reg,
+		Options: CheckOptions{
+			Lookback:    time.Hour,
+			Concurrency: 1,
+			Now:         func() time.Time { return time.Unix(1700000000, 0) },
+		},
+	}
+	checker.Run(context.Background())
+	found := false
+	for _, match := range api.matches {
+		if !strings.HasPrefix(match, "up{") {
+			continue
+		}
+		found = true
+		if !strings.Contains(match, `job="rtd-admin"`) || !strings.Contains(match, `cluster="test-cluster"`) {
+			t.Fatalf("up selector missing job/target label: %s", match)
+		}
+		if strings.Contains(match, "application=") || strings.Contains(match, "namespace=") {
+			t.Fatalf("up selector must not use application identity labels: %s", match)
+		}
+	}
+	if !found {
+		t.Fatal("no up selector was checked")
+	}
+}
+
+func TestKubernetesCoverageDetectsMetricMissingForAppPod(t *testing.T) {
+	reg, err := LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	site := smallSite()
+	site.Spec.Applications[0].Metrics = []string{"jvm", "kubernetes"}
+	site.Spec.Applications[0].Kubernetes.PodSelector = &config.PodSelector{
+		Mode:     config.PodSelectorLabels,
+		Metric:   config.DefaultPodLabelsMetric,
+		Matchers: map[string]string{"label_app": "rtd-admin"},
+	}
+	api := &selectivePromAPI{series: func(match string) []model.LabelSet {
+		switch {
+		case strings.HasPrefix(match, "kube_pod_labels"):
+			return []model.LabelSet{{"namespace": "test", "pod": "rtd-admin-1", "label_app": "rtd-admin"}}
+		case strings.HasPrefix(match, "container_cpu_usage_seconds_total"):
+			return []model.LabelSet{
+				{"namespace": "test", "pod": "rtd-admin-1", "container": "app"},
+				{"namespace": "test", "pod": "unrelated-1", "container": "app"},
+			}
+		case strings.HasPrefix(match, "container_cpu_cfs_"):
+			return []model.LabelSet{{"namespace": "test", "pod": "rtd-admin-1", "container": "app"}}
+		case strings.HasPrefix(match, "container_memory_working_set_bytes"):
+			return []model.LabelSet{{"namespace": "test", "pod": "unrelated-1", "container": "app"}}
+		}
+		return nil
+	}}
+	checker := &Checker{
+		API:      api,
+		Site:     site,
+		Registry: reg,
+		Options: CheckOptions{
+			Lookback:    time.Hour,
+			Concurrency: 1,
+			Now:         func() time.Time { return time.Unix(1700000000, 0) },
+		},
+	}
+	checks := checker.Run(context.Background())
+	status := map[string]output.Status{}
+	for _, check := range checks {
+		status[check.Name] = check.Status
+	}
+	cpu := "Kubernetes 指标/app-test/container_cpu_usage_seconds_total"
+	memory := "Kubernetes 指标/app-test/container_memory_working_set_bytes"
+	if status[cpu] != output.Pass {
+		t.Errorf("cpu coverage status = %s, want PASS", status[cpu])
+	}
+	if status[memory] != output.Warn {
+		t.Errorf("memory coverage status = %s, want WARN", status[memory])
+	}
+}
+
+func TestContainerMatcherFiltersEverythingFails(t *testing.T) {
+	reg, err := LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	site := smallSite()
+	site.Spec.Applications[0].Metrics = []string{"jvm", "kubernetes"}
+	site.Spec.Applications[0].Kubernetes.PodSelector = &config.PodSelector{
+		Mode:     config.PodSelectorLabels,
+		Metric:   config.DefaultPodLabelsMetric,
+		Matchers: map[string]string{"label_app": "rtd-admin"},
+	}
+	site.Spec.Applications[0].Kubernetes.ContainerMatchers = config.ContainerMatchers{
+		{Name: "container", Operator: config.MatchEqual, Value: "main"},
+	}
+	api := &selectivePromAPI{series: func(match string) []model.LabelSet {
+		if strings.HasPrefix(match, "kube_pod_labels") {
+			return []model.LabelSet{{"namespace": "test", "pod": "rtd-admin-1", "label_app": "rtd-admin"}}
+		}
+		if strings.Contains(match, "container") {
+			return []model.LabelSet{{"namespace": "test", "pod": "rtd-admin-1", "container": "POD"}}
+		}
+		return nil
+	}}
+	checker := &Checker{
+		API:      api,
+		Site:     site,
+		Registry: reg,
+		Options: CheckOptions{
+			Lookback:    time.Hour,
+			Concurrency: 1,
+			Now:         func() time.Time { return time.Unix(1700000000, 0) },
+		},
+	}
+	checks := checker.Run(context.Background())
+	failures := 0
+	for _, check := range checks {
+		if check.Status == output.Fail && strings.Contains(check.Name, "容器过滤") {
+			failures++
+		}
+	}
+	if failures == 0 {
+		t.Fatal("container matcher that filters all series must FAIL")
+	}
+}
+
+func TestMatcherMatchesContainerOperators(t *testing.T) {
+	business := model.LabelSet{"container": "app", "image": "registry/app:1"}
+	pause := model.LabelSet{"container": "POD"}
+	parent := model.LabelSet{"container": ""}
+	cases := []struct {
+		matcher                 config.LabelMatcher
+		business, pause, parent bool
+	}{
+		{config.LabelMatcher{Name: "container", Operator: config.MatchEqual, Value: "app"}, true, false, false},
+		{config.LabelMatcher{Name: "container", Operator: config.MatchNotEqual, Value: "POD"}, true, false, true},
+		{config.LabelMatcher{Name: "container", Operator: config.MatchRegex, Value: "app|web"}, true, false, false},
+		{config.LabelMatcher{Name: "container", Operator: config.MatchNotRegex, Value: "POD|^$"}, true, false, false},
+	}
+	for _, tc := range cases {
+		if got := matcherMatches(business, tc.matcher); got != tc.business {
+			t.Errorf("%+v business = %v, want %v", tc.matcher, got, tc.business)
+		}
+		if got := matcherMatches(pause, tc.matcher); got != tc.pause {
+			t.Errorf("%+v pause = %v, want %v", tc.matcher, got, tc.pause)
+		}
+		if got := matcherMatches(parent, tc.matcher); got != tc.parent {
+			t.Errorf("%+v parent = %v, want %v", tc.matcher, got, tc.parent)
+		}
+	}
+}
+
 func TestCheckerPromQLError(t *testing.T) {
 	checks := runChecker(t, &fakePromAPI{queryErr: errors.New("bad_data: parse error")})
 	found := false

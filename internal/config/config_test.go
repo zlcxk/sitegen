@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"gopkg.in/yaml.v3"
+
 	"site-observability/internal/config"
 	"site-observability/internal/metrics"
 )
@@ -116,6 +118,31 @@ func TestValidationRequiresApplicationAndNamespace(t *testing.T) {
 
 func TestMarshalLoadRoundTrip(t *testing.T) {
 	site, _ := loadExample(t)
+	data, err := config.Marshal(site)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := config.Decode(data, "roundtrip.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(site, decoded) {
+		t.Fatalf("roundtrip mismatch\nwant: %#v\ngot: %#v", site, decoded)
+	}
+}
+
+func TestMarshalLoadRoundTripNewFields(t *testing.T) {
+	site, _ := loadExample(t)
+	site.Spec.Applications[0].Prometheus.TargetLabels = map[string]string{"cluster": "test-cluster"}
+	site.Spec.Applications[0].Kubernetes.ContainerMatchers = config.ContainerMatchers{
+		{Name: "container", Operator: config.MatchNotEqual, Value: "POD"},
+		{Name: "image", Operator: config.MatchNotEqual, Value: ""},
+	}
+	site.Spec.Applications[0].Skywalking.UI = config.SkywalkingUI{
+		BaseURL:             "https://skywalking.example.com",
+		ServiceURLTemplate:  "https://skywalking.example.com/service?name={service}",
+		EndpointURLTemplate: "https://skywalking.example.com/endpoint?name={service}",
+	}
 	data, err := config.Marshal(site)
 	if err != nil {
 		t.Fatal(err)
@@ -257,6 +284,101 @@ func TestValidationRejectsReservedSitegenLabel(t *testing.T) {
 	}
 	if !strings.Contains(strings.Join(issues.ErrorStrings(), "\n"), "sitegen_app") {
 		t.Fatal("expected sitegen_app reserved label message")
+	}
+}
+
+func TestContainerMatchersHistoricalMapFormStillLoads(t *testing.T) {
+	var doc struct {
+		ContainerMatchers config.ContainerMatchers `yaml:"containerMatchers"`
+	}
+	if err := yaml.Unmarshal([]byte("containerMatchers:\n  container: main\n  image: \"\"\n"), &doc); err != nil {
+		t.Fatal(err)
+	}
+	if len(doc.ContainerMatchers) != 2 {
+		t.Fatalf("matchers = %#v", doc.ContainerMatchers)
+	}
+	for _, matcher := range doc.ContainerMatchers {
+		if matcher.EffectiveOperator() != config.MatchEqual {
+			t.Errorf("historical map entry must default to equal: %#v", matcher)
+		}
+	}
+}
+
+func TestContainerMatchersListFormLoads(t *testing.T) {
+	var doc struct {
+		ContainerMatchers config.ContainerMatchers `yaml:"containerMatchers"`
+	}
+	data := `containerMatchers:
+  - name: container
+    operator: not_equal
+    value: POD
+  - name: image
+    operator: not_equal
+    value: ""
+`
+	if err := yaml.Unmarshal([]byte(data), &doc); err != nil {
+		t.Fatal(err)
+	}
+	if len(doc.ContainerMatchers) != 2 || doc.ContainerMatchers[0].Operator != config.MatchNotEqual {
+		t.Fatalf("matchers = %#v", doc.ContainerMatchers)
+	}
+}
+
+func TestValidationRejectsInvalidContainerMatcherOperator(t *testing.T) {
+	site, reg := loadExample(t)
+	site.Spec.Applications[0].Kubernetes.ContainerMatchers = config.ContainerMatchers{
+		{Name: "container", Operator: "contains", Value: "POD"},
+	}
+	issues := config.Validate(site, reg.Resolve)
+	if !issues.HasErrors() {
+		t.Fatal("expected invalid operator error")
+	}
+	if !strings.Contains(strings.Join(issues.ErrorStrings(), "\n"), "operator") {
+		t.Fatal("expected operator field in error")
+	}
+}
+
+func TestValidationAcceptsTargetLabelsAndRejectsReserved(t *testing.T) {
+	site, reg := loadExample(t)
+	site.Spec.Applications[0].Prometheus.TargetLabels = map[string]string{"cluster": "test-cluster"}
+	if issues := config.Validate(site, reg.Resolve); issues.HasErrors() {
+		t.Fatalf("unexpected errors: %v", issues.ErrorStrings())
+	}
+	site.Spec.Applications[0].Prometheus.TargetLabels["job"] = "other"
+	if issues := config.Validate(site, reg.Resolve); !issues.HasErrors() {
+		t.Fatal("expected reserved target label error")
+	}
+}
+
+func TestValidationValidatesSkywalkingUI(t *testing.T) {
+	site, reg := loadExample(t)
+	site.Spec.Applications[0].Skywalking.UI = config.SkywalkingUI{
+		BaseURL:             "https://skywalking.example.com",
+		ServiceURLTemplate:  "https://skywalking.example.com/service?name={service}",
+		EndpointURLTemplate: "https://skywalking.example.com/endpoint?name={service}",
+	}
+	if issues := config.Validate(site, reg.Resolve); issues.HasErrors() {
+		t.Fatalf("unexpected errors: %v", issues.ErrorStrings())
+	}
+	site.Spec.Applications[0].Skywalking.UI.BaseURL = "ftp://bad"
+	if issues := config.Validate(site, reg.Resolve); !issues.HasErrors() {
+		t.Fatal("expected invalid SkyWalking UI URL error")
+	}
+}
+
+func TestContainerMatcherWarningOnlyWhenPodSelectorExists(t *testing.T) {
+	site, reg := loadExample(t)
+	for i := range site.Spec.Applications {
+		site.Spec.Applications[i].Kubernetes.ContainerMatchers = nil
+		site.Spec.Applications[i].Kubernetes.PodSelector = nil
+	}
+	issues := config.Validate(site, reg.Resolve)
+	joined := strings.Join(issues.ErrorStrings(), "\n")
+	if strings.Contains(joined, "containerMatchers") {
+		t.Fatalf("container matcher warning must not be emitted when no Pod selector exists:\n%s", joined)
+	}
+	if !strings.Contains(joined, "podSelector") {
+		t.Fatal("expected podSelector warning")
 	}
 }
 

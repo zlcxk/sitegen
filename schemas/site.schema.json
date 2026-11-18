@@ -148,6 +148,24 @@
             "endpointFormat": {
               "type": "string",
               "minLength": 1
+            },
+            "ui": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "baseURL": {
+                  "type": "string",
+                  "format": "uri"
+                },
+                "serviceURLTemplate": {
+                  "type": "string",
+                  "description": "支持 {service}、{application}、{namespace}、{site}。"
+                },
+                "endpointURLTemplate": {
+                  "type": "string",
+                  "description": "支持 {service}、{application}、{namespace}、{site}。必须在目标 SkyWalking 版本中实际验证。"
+                }
+              }
             }
           }
         },
@@ -195,15 +213,40 @@
               }
             },
             "containerMatchers": {
-              "type": "object",
-              "additionalProperties": {
-                "type": "string",
-                "minLength": 1
-              },
-              "propertyNames": {
-                "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$"
-              },
-              "description": "可选容器过滤条件（如 image/container）。未配置时不会硬编码 container 标签，并会输出 WARN。"
+              "description": "容器过滤条件。兼容旧版 map 写法，也支持带 operator 的列表写法。",
+              "oneOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "propertyNames": {
+                    "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$"
+                  }
+                },
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["name", "value"],
+                    "properties": {
+                      "name": {
+                        "type": "string",
+                        "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$"
+                      },
+                      "operator": {
+                        "enum": ["equal", "not_equal", "regex", "not_regex"]
+                      },
+                      "value": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    }
+                  }
+                }
+              ]
             }
           }
         },
@@ -235,7 +278,18 @@
           "propertyNames": {
             "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$"
           },
-          "description": "额外标签。application、namespace 必须与字段一致；job 使用专用字段。应用不按 instance 区分。"
+          "description": "应用指标身份标签。application、namespace 必须与字段一致；job 使用专用字段。"
+        },
+        "targetLabels": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "minLength": 1
+          },
+          "propertyNames": {
+            "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$"
+          },
+          "description": "仅用于 up 指标的目标标签。默认只使用 job；不要在这里重复 application/namespace。"
         }
       }
     },

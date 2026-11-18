@@ -50,6 +50,20 @@ func (p *mapPrompter) Input(label, defaultValue string, validate func(string) er
 		value = "mysql-wizard"
 	case strings.Contains(label, "Instance"):
 		value = "mysql:3306"
+	case strings.Contains(label, "Pod 标签名称"):
+		value = "label_app"
+	case strings.Contains(label, "Pod 标签值"):
+		value = "wizard-app"
+	case strings.Contains(label, "Pod 名称正则"):
+		value = "^wizard-app-.*$"
+	case strings.Contains(label, "Pod 标签匹配 Metric"):
+		if value == "" {
+			value = "kube_pod_labels"
+		}
+	case strings.Contains(label, "容器过滤标签名称"):
+		value = "container"
+	case strings.Contains(label, "容器过滤标签值"):
+		value = "app"
 	}
 	if validate != nil {
 		if err := validate(value); err != nil {
@@ -96,13 +110,14 @@ func TestWizardCreate(t *testing.T) {
 	prompter := &mapPrompter{
 		out: out,
 		confirmMap: map[string]bool{
-			"继续添加域名":   false,
-			"是否关联应用":   true,
-			"自动生成":     true,
-			"继续添加应用":   false,
-			"是否配置依赖组件": true,
-			"继续添加依赖组件": false,
-			"确认写入":     true,
+			"继续添加域名":     false,
+			"是否关联应用":     true,
+			"自动生成":       true,
+			"继续添加应用":     false,
+			"是否配置依赖组件":   true,
+			"继续添加依赖组件":   false,
+			"是否配置容器过滤规则": false,
+			"确认写入":       true,
 		},
 		multiMap: map[string][]int{
 			"的依赖": {0},
@@ -125,6 +140,11 @@ func TestWizardCreate(t *testing.T) {
 	if got := site.Spec.Applications[0].Dependencies; len(got) != 1 || got[0] != "mysql-wizard" {
 		t.Errorf("dependencies = %#v", got)
 	}
+	podSelector := site.Spec.Applications[0].Kubernetes.PodSelector
+	if podSelector == nil || podSelector.Mode != config.PodSelectorLabels ||
+		podSelector.Matchers["label_app"] != "wizard-app" {
+		t.Errorf("Kubernetes pod selector was not collected by the wizard: %#v", podSelector)
+	}
 	issues := config.Validate(site, reg.Resolve)
 	if issues.HasErrors() {
 		t.Fatalf("validation errors: %v", issues.ErrorStrings())
@@ -145,7 +165,13 @@ func TestWizardEditKeepsExistingGraph(t *testing.T) {
 	}
 	out := &bytes.Buffer{}
 	wizard := &Wizard{
-		Prompter: &mapPrompter{out: out, useDefaults: true},
+		Prompter: &mapPrompter{
+			out:         out,
+			useDefaults: true,
+			confirmMap: map[string]bool{
+				"是否配置容器过滤规则": false,
+			},
+		},
 		Registry: reg,
 		Out:      out,
 	}
@@ -162,6 +188,9 @@ func TestWizardEditKeepsExistingGraph(t *testing.T) {
 	}
 	if len(edited.Spec.Applications[0].Dependencies) != len(existing.Spec.Applications[0].Dependencies) {
 		t.Fatal("dependencies were not preserved")
+	}
+	if edited.Spec.Applications[0].Kubernetes.PodSelector == nil {
+		t.Fatal("existing Kubernetes pod selector was not preserved")
 	}
 	issues := config.Validate(edited, reg.Resolve)
 	if issues.HasErrors() {
@@ -270,7 +299,7 @@ func okPromHandler() http.Handler {
 			fmt.Fprint(w, `{"status":"success","data":[{
 				"application":"rtd-admin","namespace":"test","job":"app","instance":"x",
 				"status":"200","method":"GET","uri":"/orders","area":"heap","pod":"pod-1",
-				"container":"app","node":"node-1","phase":"Running"
+				"container":"app","node":"node-1","phase":"Running","label_app":"rtd-admin"
 			}]}`)
 		case strings.HasSuffix(r.URL.Path, "/api/v1/label/__name__/values"):
 			matches := r.Form["match[]"]

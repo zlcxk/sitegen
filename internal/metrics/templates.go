@@ -2,6 +2,7 @@ package metrics
 
 import (
 	"regexp"
+	"strings"
 
 	"site-observability/internal/config"
 )
@@ -116,6 +117,34 @@ var allowedPanelTypes = map[string]bool{
 	"table":      true,
 	"bargauge":   true,
 	"gauge":      true,
+}
+
+// ProfileSelectorVar returns the single-select application variable used by a
+// profile's panels. Each profile has its own variable so an application that
+// did not enable that profile can never be selected there.
+func ProfileSelectorVar(profileID string) string {
+	switch profileID {
+	case "http":
+		return "http_app_selector"
+	case "jvm":
+		return "jvm_app_selector"
+	case "kubernetes":
+		return "k8s_app_selector"
+	default:
+		return strings.ReplaceAll(profileID, "-", "_") + "_app_selector"
+	}
+}
+
+// ProfilePodVar returns the pod variable associated with a profile selector.
+func ProfilePodVar(profileID string) string {
+	switch profileID {
+	case "jvm":
+		return "jvm_pod"
+	case "kubernetes":
+		return "k8s_pod"
+	default:
+		return strings.ReplaceAll(profileID, "-", "_") + "_pod"
+	}
 }
 
 // ResolveAdapter lets the config package validate template references without

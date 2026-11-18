@@ -103,26 +103,40 @@ func TestBuildExampleDeterministic(t *testing.T) {
 	for _, v := range dashboard.Templating.List {
 		vars[v.Name] = v
 	}
-	for _, name := range []string{"datasource", "app_selector", "pod"} {
+	for _, name := range []string{
+		"datasource",
+		"http_app_selector", "jvm_app_selector", "k8s_app_selector",
+		"jvm_pod", "k8s_pod",
+	} {
 		if _, ok := vars[name]; !ok {
 			t.Errorf("missing variable %q", name)
 		}
 	}
-	for _, removed := range []string{"application", "namespace", "component", "instance"} {
+	for _, removed := range []string{"application", "namespace", "component", "instance", "app_selector", "pod"} {
 		if _, ok := vars[removed]; ok {
 			t.Errorf("legacy/decorative variable %q must not be emitted", removed)
 		}
 	}
-	selector := vars["app_selector"]
-	if selector.Multi || selector.IncludeAll {
-		t.Error("app_selector must be single-select so application objects cannot be recombined")
+	httpSelector := vars["http_app_selector"]
+	if httpSelector.Multi || httpSelector.IncludeAll {
+		t.Error("profile selectors must be single-select")
 	}
-	if len(selector.Options) != 2 {
-		t.Errorf("app_selector options = %d", len(selector.Options))
+	// Only rtd-admin enables HTTP in the example; user-center only enables JVM
+	// and Kubernetes.
+	if len(httpSelector.Options) != 1 {
+		t.Errorf("http_app_selector options = %d", len(httpSelector.Options))
 	}
-	podVar := vars["pod"]
-	if !strings.Contains(podVar.Query.(string), "app_selector") {
-		t.Error("pod variable must depend on app_selector")
+	if len(vars["jvm_app_selector"].Options) != 2 {
+		t.Errorf("jvm_app_selector options = %d", len(vars["jvm_app_selector"].Options))
+	}
+	if len(vars["k8s_app_selector"].Options) != 2 {
+		t.Errorf("k8s_app_selector options = %d", len(vars["k8s_app_selector"].Options))
+	}
+	if !strings.Contains(vars["jvm_pod"].Query.(string), "jvm_app_selector") {
+		t.Error("jvm_pod must depend on jvm_app_selector")
+	}
+	if !strings.Contains(vars["k8s_pod"].Query.(string), "k8s_app_selector") {
+		t.Error("k8s_pod must depend on k8s_app_selector")
 	}
 
 	if strings.Contains(string(first), "SkyWalking 拓扑图") {
@@ -192,8 +206,8 @@ func TestSiteAggregateUsesOnlyEntryApplications(t *testing.T) {
 		if !strings.Contains(expr, "user-center-application") {
 			t.Fatal("HTTP detail union should include the newly enabled app")
 		}
-		if !strings.Contains(expr, "app_selector") {
-			t.Fatal("HTTP detail query must be filtered by $app_selector")
+		if !strings.Contains(expr, "http_app_selector") {
+			t.Fatal("HTTP detail query must be filtered by the HTTP profile selector")
 		}
 	}
 }
@@ -206,8 +220,8 @@ func TestHTTPOnlySiteHasNoDecorativePodVariable(t *testing.T) {
 	}
 	d := buildDashboard(t, site, reg, config.Links{})
 	for _, variable := range d.Templating.List {
-		if variable.Name == "pod" {
-			t.Fatal("HTTP-only site must not emit an unused $pod variable")
+		if strings.HasSuffix(variable.Name, "_pod") {
+			t.Fatalf("HTTP-only site must not emit an unused pod variable %q", variable.Name)
 		}
 	}
 }
@@ -322,6 +336,33 @@ func TestKubernetesQueriesUseDeclaredPodOwnership(t *testing.T) {
 	}
 }
 
+func TestKubernetesCPUAndMemoryShareFilters(t *testing.T) {
+	site, reg := loadExample(t)
+	site.Spec.Applications[0].Kubernetes.ContainerMatchers = config.ContainerMatchers{
+		{Name: "container", Operator: config.MatchNotEqual, Value: "POD"},
+		{Name: "image", Operator: config.MatchNotEqual, Value: ""},
+	}
+	d := buildDashboard(t, site, reg, config.Links{})
+	for _, title := range []string{"Pod CPU", "Pod 内存 Working Set", "CPU Throttling"} {
+		panels := findByTitle(d, title)
+		if len(panels) != 1 {
+			t.Fatalf("%s count = %d", title, len(panels))
+		}
+		expr := panels[0].Targets[0].Expr
+		for _, want := range []string{
+			`container!="POD"`,
+			`image!=""`,
+			`kube_pod_labels`,
+			`label_app="rtd-admin"`,
+			`pod=~${k8s_pod:json}`,
+		} {
+			if !strings.Contains(expr, want) {
+				t.Errorf("%s missing shared filter %q:\n%s", title, want, expr)
+			}
+		}
+	}
+}
+
 func TestNoDuplicateDetailedPanels(t *testing.T) {
 	site, reg := loadExample(t)
 	d := buildDashboard(t, site, reg, config.Links{})
@@ -374,7 +415,7 @@ func TestSameApplicationDifferentNamespacesNotCombined(t *testing.T) {
 	d := buildDashboard(t, site, reg, config.Links{})
 	appVar := Variable{}
 	for _, v := range d.Templating.List {
-		if v.Name == "app_selector" {
+		if v.Name == "http_app_selector" {
 			appVar = v
 		}
 	}
@@ -392,8 +433,73 @@ func TestSameApplicationDifferentNamespacesNotCombined(t *testing.T) {
 	if strings.Contains(joined, `namespace=~"test|dev"`) {
 		t.Fatal("namespace alternation would allow cross-object matching")
 	}
-	if !strings.Contains(joined, "app_selector") {
-		t.Fatal("application panels must be restricted by app_selector")
+	if !strings.Contains(joined, "http_app_selector") {
+		t.Fatal("HTTP panels must be restricted by the HTTP profile selector")
+	}
+}
+
+func TestTargetLabelsUsedOnlyForUpSelector(t *testing.T) {
+	site, reg := loadExample(t)
+	site.Spec.Applications[0].Prometheus.TargetLabels = map[string]string{"cluster": "test-cluster"}
+	d := buildDashboard(t, site, reg, config.Links{})
+	panels := findByTitle(d, "应用指标采集状态")
+	if len(panels) != 1 {
+		t.Fatal("application collection status panel missing")
+	}
+	expr := panels[0].Targets[0].Expr
+	if !strings.Contains(expr, `cluster="test-cluster"`) || !strings.Contains(expr, `job="rtd-admin"`) {
+		t.Fatalf("up selector missing target labels: %s", expr)
+	}
+	if strings.Contains(expr, "application=") || strings.Contains(expr, "namespace=") {
+		t.Fatalf("up selector must not use application identity labels: %s", expr)
+	}
+}
+
+func TestApplicationSkywalkingUIOverride(t *testing.T) {
+	site, reg := loadExample(t)
+	site.Spec.Applications[0].Skywalking.UI = config.SkywalkingUI{
+		BaseURL:             "https://sw-app.example.com",
+		ServiceURLTemplate:  "https://sw-app.example.com/service?name={service}",
+		EndpointURLTemplate: "https://sw-app.example.com/endpoint?name={service}",
+	}
+	data, err := BuildJSON(site, reg, config.Links{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	if !strings.Contains(text, "https://sw-app.example.com/service?name=rtd-admin_test") {
+		t.Fatal("application-level SkyWalking service link missing")
+	}
+	if !strings.Contains(text, "https://sw-app.example.com/endpoint?name=rtd-admin_test") {
+		t.Fatal("application-level SkyWalking endpoint link missing")
+	}
+}
+
+func TestGeneratedDashboardHasNoSubquery(t *testing.T) {
+	site, reg := loadExample(t)
+	d := buildDashboard(t, site, reg, config.Links{})
+	for _, expr := range exprs(d) {
+		if strings.Contains(expr, "[5m:]") {
+			t.Fatalf("generated dashboard contains an unexpected subquery:\n%s", expr)
+		}
+		if err := metrics.ValidateQuery(expr); err != nil {
+			t.Fatalf("generated query invalid: %v\n%s", err, expr)
+		}
+	}
+}
+
+func TestMissingPodSelectorDoesNotEmitContainerWarning(t *testing.T) {
+	site, reg := loadExample(t)
+	for i := range site.Spec.Applications {
+		site.Spec.Applications[i].Kubernetes.PodSelector = nil
+		site.Spec.Applications[i].Kubernetes.ContainerMatchers = nil
+	}
+	d := buildDashboard(t, site, reg, config.Links{})
+	if len(findByTitle(d, "Kubernetes Pod 归属缺失")) != 1 {
+		t.Fatal("missing podSelector warning panel missing")
+	}
+	if len(findByTitle(d, "容器过滤条件提示")) != 0 {
+		t.Fatal("container matcher warning must not be emitted when no podSelector exists")
 	}
 }
 
@@ -444,7 +550,7 @@ func TestNoSkywalkingEndpointTemplateDoesNotFakeEndpointLink(t *testing.T) {
 	if strings.Contains(text, "Endpoint 页面") {
 		t.Fatal("endpoint link must not be faked without an endpoint URL template")
 	}
-	if !strings.Contains(text, "未配置 `skywalkingEndpointURLTemplate`") {
+	if !strings.Contains(text, "skywalkingEndpointURLTemplate") {
 		t.Fatal("missing endpoint template should be explained explicitly")
 	}
 }

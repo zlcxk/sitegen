@@ -72,17 +72,42 @@ func Build(site *config.Site, registry *metrics.Registry, links config.Links) (*
 		sections: map[string][]Panel{},
 	}
 	b.addDomainPanels()
-	b.addApplicationPanels()
+	if err := b.addApplicationPanels(); err != nil {
+		return nil, err
+	}
 	b.addComponentPanels()
 	b.addServicePanels()
 
-	d.Templating = Templating{List: buildVariables(site, registry)}
+	variables, err := buildVariables(site, registry)
+	if err != nil {
+		return nil, err
+	}
+	d.Templating = Templating{List: variables}
 	d.Panels = b.layout()
 
+	if err := validatePanelQueries(d.Panels); err != nil {
+		return nil, err
+	}
 	if err := Validate(&d); err != nil {
 		return nil, fmt.Errorf("生成 Dashboard 校验失败: %w", err)
 	}
 	return &d, nil
+}
+
+func validatePanelQueries(panels []Panel) error {
+	for _, panel := range panels {
+		for _, target := range panel.Targets {
+			if err := metrics.ValidateQuery(target.Expr); err != nil {
+				return fmt.Errorf("面板 %q 的 PromQL 无效: %w", panel.Title, err)
+			}
+		}
+		if panel.Panels != nil {
+			if err := validatePanelQueries(*panel.Panels); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // DashboardUID returns a stable, Grafana-safe UID (maximum 40 characters).
@@ -120,7 +145,7 @@ func (b *builder) addDomainPanels() {
 	}
 }
 
-func (b *builder) addApplicationPanels() {
+func (b *builder) addApplicationPanels() error {
 	for _, id := range b.registry.Order {
 		profile := b.registry.Profiles[id]
 		if profile.Auto || profile.Target != config.TargetApplication {
@@ -141,11 +166,17 @@ func (b *builder) addApplicationPanels() {
 						}
 						continue
 					}
-					query := metrics.RenderApplicationQuery(panel.Query, entry, false)
+					query, err := metrics.RenderApplicationQuery(panel.Query, entry, false, "")
+					if err != nil {
+						return fmt.Errorf("生成面板 %q: %w", panel.Name, err)
+					}
 					b.addTemplatePanel(panel, panel.Name, query, nil)
 					continue
 				}
-				query := metrics.RenderApplicationQuery(panel.Query, apps, true)
+				query, err := metrics.RenderApplicationQuery(panel.Query, apps, true, metrics.ProfileSelectorVar(profile.ID))
+				if err != nil {
+					return fmt.Errorf("生成面板 %q: %w", panel.Name, err)
+				}
 				b.addTemplatePanel(panel, panel.Name, query, nil)
 			case metrics.ScopeNamespace:
 				k8sApps, missing := splitKubernetesApps(apps)
@@ -156,7 +187,10 @@ func (b *builder) addApplicationPanels() {
 					continue
 				}
 				b.addContainerMatcherWarning(k8sApps)
-				query := metrics.RenderNamespaceQuery(panel.Query, k8sApps, true)
+				query, err := metrics.RenderNamespaceQuery(panel.Query, k8sApps, true, metrics.ProfileSelectorVar(profile.ID))
+				if err != nil {
+					return fmt.Errorf("生成面板 %q: %w", panel.Name, err)
+				}
 				b.addTemplatePanel(panel, panel.Name, query, nil)
 			}
 		}
@@ -165,11 +199,15 @@ func (b *builder) addApplicationPanels() {
 	if len(b.site.Spec.Applications) > 0 {
 		if auto, ok := b.registry.AutoProfile("platform"); ok {
 			for _, panel := range auto.Panels {
-				query := metrics.RenderJobQuery(panel.Query, b.site.Spec.Applications)
+				query, err := metrics.RenderJobQuery(panel.Query, b.site.Spec.Applications)
+				if err != nil {
+					return fmt.Errorf("生成面板 %q: %w", panel.Name, err)
+				}
 				b.addTemplatePanel(panel, panel.Name, query, nil)
 			}
 		}
 	}
+	return nil
 }
 
 func (b *builder) addEntryApplicationWarning() {

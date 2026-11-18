@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/url"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -32,6 +33,15 @@ func (w *Wizard) Create() (*config.Site, error) {
 		return nil, err
 	}
 	if err := w.promptApplications(site); err != nil {
+		return nil, err
+	}
+	if err := w.promptTargetLabelsSettings(site); err != nil {
+		return nil, err
+	}
+	if err := w.promptKubernetesSettings(site); err != nil {
+		return nil, err
+	}
+	if err := w.promptSkywalkingUISettings(site); err != nil {
 		return nil, err
 	}
 	if err := w.promptEntryApplications(site); err != nil {
@@ -89,6 +99,15 @@ func (w *Wizard) Edit(existing *config.Site) (*config.Site, error) {
 		if err := w.promptApplications(site); err != nil {
 			return nil, err
 		}
+	}
+	if err := w.promptTargetLabelsSettings(site); err != nil {
+		return nil, err
+	}
+	if err := w.promptKubernetesSettings(site); err != nil {
+		return nil, err
+	}
+	if err := w.promptSkywalkingUISettings(site); err != nil {
+		return nil, err
 	}
 	if err := w.promptEntryApplications(site); err != nil {
 		return nil, err
@@ -362,6 +381,281 @@ func (w *Wizard) promptComponents(site *config.Site) error {
 	}
 }
 
+var wizardLabelNameRE = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
+
+func (w *Wizard) promptTargetLabelsSettings(site *config.Site) error {
+	for i := range site.Spec.Applications {
+		app := &site.Spec.Applications[i]
+		if len(app.Prometheus.TargetLabels) > 0 {
+			keep, err := w.Prompter.Confirm("应用 "+app.ID+" 保留现有 up Target Labels?", true)
+			if err != nil {
+				return err
+			}
+			if keep {
+				continue
+			}
+			app.Prometheus.TargetLabels = nil
+		}
+		configure, err := w.Prompter.Confirm("是否为应用 "+app.ID+" 配置 up 指标 Target Labels?", false)
+		if err != nil {
+			return err
+		}
+		if !configure {
+			continue
+		}
+		raw, err := w.Prompter.Input("Target Labels（key=value，逗号分隔，仅用于 up）", "", func(value string) error {
+			_, err := parseLabels(value)
+			return err
+		})
+		if err != nil {
+			return err
+		}
+		labels, err := parseLabels(raw)
+		if err != nil {
+			return err
+		}
+		app.Prometheus.TargetLabels = labels
+	}
+	return nil
+}
+
+// promptKubernetesSettings collects the Pod ownership and container filtering
+// rules required for application-level Kubernetes panels.
+func (w *Wizard) promptKubernetesSettings(site *config.Site) error {
+	for i := range site.Spec.Applications {
+		app := &site.Spec.Applications[i]
+		if !app.HasMetric("kubernetes") {
+			continue
+		}
+		if app.Kubernetes.PodSelector != nil {
+			keep, err := w.Prompter.Confirm("应用 "+app.ID+" 保留现有 Kubernetes Pod 归属配置?", true)
+			if err != nil {
+				return err
+			}
+			if !keep {
+				app.Kubernetes.PodSelector = nil
+				app.Kubernetes.ContainerMatchers = nil
+			}
+		}
+		if app.Kubernetes.PodSelector == nil {
+			if err := w.promptPodSelector(app); err != nil {
+				return err
+			}
+		}
+		if app.Kubernetes.PodSelector == nil {
+			app.Kubernetes.ContainerMatchers = nil
+			continue
+		}
+		if err := w.promptContainerMatchers(app); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (w *Wizard) promptPodSelector(app *config.Application) error {
+	index, err := w.Prompter.Select("Kubernetes 应用 Pod 归属方式", []string{
+		"Kubernetes Pod 标签匹配",
+		"Pod 名称正则匹配",
+		"暂不配置，后续手动完善",
+	}, 0)
+	if err != nil {
+		return err
+	}
+	switch index {
+	case 0:
+		defaultMetric := config.DefaultPodLabelsMetric
+		if app.Kubernetes.PodSelector != nil && app.Kubernetes.PodSelector.Metric != "" {
+			defaultMetric = app.Kubernetes.PodSelector.Metric
+		}
+		metric, err := w.Prompter.Input("Pod 标签匹配 Metric", defaultMetric, func(value string) error {
+			if strings.TrimSpace(value) == "" {
+				return fmt.Errorf("不能为空")
+			}
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+		matchers := map[string]string{}
+		for {
+			name, err := w.Prompter.Input("Pod 标签名称", "", func(value string) error {
+				if !wizardLabelNameRE.MatchString(value) {
+					return fmt.Errorf("不是合法的 Prometheus 标签名")
+				}
+				return nil
+			})
+			if err != nil {
+				return err
+			}
+			value, err := w.Prompter.Input("Pod 标签值", "", nonEmpty("Pod 标签值"))
+			if err != nil {
+				return err
+			}
+			matchers[name] = value
+			more, err := w.Prompter.Confirm("继续添加 Pod 标签?", false)
+			if err != nil {
+				return err
+			}
+			if !more {
+				break
+			}
+		}
+		app.Kubernetes.PodSelector = &config.PodSelector{
+			Mode:     config.PodSelectorLabels,
+			Metric:   metric,
+			Matchers: matchers,
+		}
+	case 1:
+		pod, err := w.Prompter.Input("Pod 名称正则（示例：^rtd-admin-.*）", "", func(value string) error {
+			if strings.TrimSpace(value) == "" {
+				return fmt.Errorf("不能为空")
+			}
+			_, err := regexp.Compile(value)
+			return err
+		})
+		if err != nil {
+			return err
+		}
+		app.Kubernetes.PodSelector = &config.PodSelector{
+			Mode: config.PodSelectorPodRegex,
+			Pod:  pod,
+		}
+		fmt.Fprintln(w.Out, "提示：Deployment 滚动更新后 Pod 名称会变化，请确保正则能覆盖新实例。")
+	default:
+		app.Kubernetes.PodSelector = nil
+		app.Kubernetes.ContainerMatchers = nil
+		fmt.Fprintln(w.Out, "未配置 Pod 归属规则。Kubernetes 应用级 Pod CPU、内存等面板将不会生成，")
+		fmt.Fprintln(w.Out, "避免将 Namespace 中其他应用的 Pod 计入当前应用。可后续在 YAML 中补充规则后重新执行 build。")
+	}
+	return nil
+}
+
+func (w *Wizard) promptContainerMatchers(app *config.Application) error {
+	if len(app.Kubernetes.ContainerMatchers) > 0 {
+		keep, err := w.Prompter.Confirm("应用 "+app.ID+" 保留现有容器过滤规则?", true)
+		if err != nil {
+			return err
+		}
+		if keep {
+			return nil
+		}
+		app.Kubernetes.ContainerMatchers = nil
+	}
+	configure, err := w.Prompter.Confirm("是否配置容器过滤规则?", true)
+	if err != nil {
+		return err
+	}
+	if !configure {
+		app.Kubernetes.ContainerMatchers = nil
+		return nil
+	}
+	operators := []string{"equal（=）", "not_equal（!=）", "regex（=~）", "not_regex（!~）"}
+	operatorValues := []string{config.MatchEqual, config.MatchNotEqual, config.MatchRegex, config.MatchNotRegex}
+	var matchers config.ContainerMatchers
+	for {
+		name, err := w.Prompter.Input("容器过滤标签名称", "", func(value string) error {
+			if !wizardLabelNameRE.MatchString(value) {
+				return fmt.Errorf("不是合法的 Prometheus 标签名")
+			}
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+		index, err := w.Prompter.Select("容器过滤操作符", operators, 0)
+		if err != nil {
+			return err
+		}
+		operator := operatorValues[index]
+		value, err := w.Prompter.Input("容器过滤标签值", "", func(value string) error {
+			if operator == config.MatchRegex || operator == config.MatchNotRegex {
+				_, err := regexp.Compile(value)
+				return err
+			}
+			if strings.TrimSpace(value) == "" {
+				return fmt.Errorf("不能为空")
+			}
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+		matchers = append(matchers, config.LabelMatcher{Name: name, Operator: operator, Value: value})
+		more, err := w.Prompter.Confirm("继续添加容器过滤条件?", false)
+		if err != nil {
+			return err
+		}
+		if !more {
+			break
+		}
+	}
+	app.Kubernetes.ContainerMatchers = matchers
+	return nil
+}
+
+func (w *Wizard) promptSkywalkingUISettings(site *config.Site) error {
+	for i := range site.Spec.Applications {
+		app := &site.Spec.Applications[i]
+		ui := app.Skywalking.UI
+		if ui.BaseURL != "" || ui.ServiceURLTemplate != "" || ui.EndpointURLTemplate != "" {
+			keep, err := w.Prompter.Confirm("应用 "+app.ID+" 保留现有 SkyWalking UI 下钻配置?", true)
+			if err != nil {
+				return err
+			}
+			if keep {
+				continue
+			}
+			app.Skywalking.UI = config.SkywalkingUI{}
+			ui = app.Skywalking.UI
+		}
+		configure, err := w.Prompter.Confirm("是否为应用 "+app.ID+" 配置 SkyWalking UI 地址/下钻模板?", false)
+		if err != nil {
+			return err
+		}
+		if !configure {
+			continue
+		}
+		baseURL, err := w.Prompter.Input("SkyWalking UI 地址（可留空）", ui.BaseURL, func(value string) error {
+			if strings.TrimSpace(value) == "" {
+				return nil
+			}
+			return config.ValidateHTTPURL(value)
+		})
+		if err != nil {
+			return err
+		}
+		serviceTemplate, err := w.Prompter.Input(
+			"Service URL 模板（支持 {service}/{application}/{namespace}/{site}，可留空）", ui.ServiceURLTemplate,
+			func(value string) error {
+				if strings.TrimSpace(value) == "" {
+					return nil
+				}
+				return config.ValidateURLTemplate(value)
+			})
+		if err != nil {
+			return err
+		}
+		endpointTemplate, err := w.Prompter.Input(
+			"Endpoint URL 模板（支持 {service}/{application}/{namespace}/{site}，可留空）", ui.EndpointURLTemplate,
+			func(value string) error {
+				if strings.TrimSpace(value) == "" {
+					return nil
+				}
+				return config.ValidateURLTemplate(value)
+			})
+		if err != nil {
+			return err
+		}
+		app.Skywalking.UI = config.SkywalkingUI{
+			BaseURL:             baseURL,
+			ServiceURLTemplate:  serviceTemplate,
+			EndpointURLTemplate: endpointTemplate,
+		}
+	}
+	return nil
+}
+
 // promptEntryApplications binds each domain to the applications that actually
 // serve external traffic. It is an explicit relationship, never inferred from
 // application names.
@@ -540,6 +834,44 @@ func (w *Wizard) printPreview(site *config.Site, issues config.Issues) {
 	for _, app := range site.Spec.Applications {
 		fmt.Fprintf(w.Out, "  - %s  %s/%s  job=%s\n", app.ID, app.Application, app.Namespace, app.Prometheus.Job)
 		fmt.Fprintf(w.Out, "    SkyWalking=%s  metrics=%s\n", app.Skywalking.Service, strings.Join(app.Metrics, ", "))
+		if len(app.Prometheus.TargetLabels) > 0 {
+			var pairs []string
+			for _, key := range sortedStringKeys(app.Prometheus.TargetLabels) {
+				pairs = append(pairs, key+"="+app.Prometheus.TargetLabels[key])
+			}
+			fmt.Fprintf(w.Out, "    Target Labels: %s\n", strings.Join(pairs, ", "))
+		}
+		if app.HasMetric("kubernetes") {
+			switch {
+			case app.Kubernetes.PodSelector == nil:
+				fmt.Fprintln(w.Out, "    Kubernetes:")
+				fmt.Fprintln(w.Out, "      Pod Selector: 未配置")
+				fmt.Fprintln(w.Out, "      应用级 Kubernetes 面板: 不生成")
+			case app.Kubernetes.PodSelector.Mode == config.PodSelectorPodRegex:
+				fmt.Fprintf(w.Out, "    Kubernetes:\n      Pod Selector: pod-regex %s\n", app.Kubernetes.PodSelector.Pod)
+			default:
+				fmt.Fprintf(w.Out, "    Kubernetes:\n      Pod Selector: labels %s",
+					app.Kubernetes.PodSelector.PodLabelMetric())
+				for _, key := range sortedStringKeys(app.Kubernetes.PodSelector.Matchers) {
+					fmt.Fprintf(w.Out, " %s=%s", key, app.Kubernetes.PodSelector.Matchers[key])
+				}
+				fmt.Fprintln(w.Out)
+			}
+			if len(app.Kubernetes.ContainerMatchers) > 0 {
+				fmt.Fprintf(w.Out, "      Container Matcher: 已配置（%d 条）\n", len(app.Kubernetes.ContainerMatchers))
+			} else if app.Kubernetes.PodSelector != nil {
+				fmt.Fprintln(w.Out, "      Container Matcher: 未配置")
+			}
+		}
+		if app.Skywalking.UI.BaseURL != "" || app.Skywalking.UI.ServiceURLTemplate != "" || app.Skywalking.UI.EndpointURLTemplate != "" {
+			fmt.Fprintf(w.Out, "    SkyWalking UI: %s\n", app.Skywalking.UI.BaseURL)
+			if app.Skywalking.UI.ServiceURLTemplate != "" {
+				fmt.Fprintf(w.Out, "      Service URL 模板: %s\n", app.Skywalking.UI.ServiceURLTemplate)
+			}
+			if app.Skywalking.UI.EndpointURLTemplate != "" {
+				fmt.Fprintf(w.Out, "      Endpoint URL 模板: %s\n", app.Skywalking.UI.EndpointURLTemplate)
+			}
+		}
 		if len(app.Dependencies) > 0 {
 			fmt.Fprintf(w.Out, "    dependencies=%s\n", strings.Join(app.Dependencies, ", "))
 		}
@@ -559,6 +891,15 @@ func (w *Wizard) printPreview(site *config.Site, issues config.Issues) {
 		}
 	}
 	fmt.Fprintln(w.Out)
+}
+
+func sortedStringKeys(values map[string]string) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 func (w *Wizard) idTaken(site *config.Site, id string) bool {
@@ -615,7 +956,7 @@ func parseLabels(raw string) (map[string]string, error) {
 			return nil, fmt.Errorf("非法标签名 %q", key)
 		}
 		switch key {
-		case "application", "namespace", "job", "instance":
+		case "application", "namespace", "job", "instance", config.SitegenAppLabel:
 			return nil, fmt.Errorf("标签 %q 由专用字段管理，不能作为额外标签", key)
 		}
 		if value == "" {

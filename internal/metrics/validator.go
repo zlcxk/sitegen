@@ -97,9 +97,11 @@ func validateProfile(p *Profile) error {
 			}
 		}
 		for _, match := range varRE.FindAllStringSubmatch(pn.Query, -1) {
-			if !allowedVars[match[1]] {
-				return fmt.Errorf("%s: 不支持或拼写错误的 Dashboard 变量 $%s", path, match[1])
+			name := match[1]
+			if allowedVars[name] || strings.HasSuffix(name, "_pod") || strings.HasSuffix(name, "_app_selector") {
+				continue
 			}
+			return fmt.Errorf("%s: 不支持或拼写错误的 Dashboard 变量 $%s", path, name)
 		}
 		if len(pn.RequiredMetrics) == 0 {
 			return fmt.Errorf("%s: requiredMetrics 不能为空", path)

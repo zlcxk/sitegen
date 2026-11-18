@@ -1,6 +1,11 @@
 package config
 
-import "strings"
+import (
+	"fmt"
+	"strings"
+
+	"gopkg.in/yaml.v3"
+)
 
 const (
 	// APIVersion is the only supported configuration API version.
@@ -86,7 +91,74 @@ type Application struct {
 // ownership must be declared explicitly.
 type Kubernetes struct {
 	PodSelector       *PodSelector      `yaml:"podSelector,omitempty" json:"podSelector,omitempty"`
-	ContainerMatchers map[string]string `yaml:"containerMatchers,omitempty" json:"containerMatchers,omitempty"`
+	ContainerMatchers ContainerMatchers `yaml:"containerMatchers,omitempty" json:"containerMatchers,omitempty"`
+}
+
+// Matcher operators.
+const (
+	MatchEqual    = "equal"
+	MatchNotEqual = "not_equal"
+	MatchRegex    = "regex"
+	MatchNotRegex = "not_regex"
+)
+
+// LabelMatcher is one container label condition. The zero operator means
+// equal, which keeps the historical map form compatible.
+type LabelMatcher struct {
+	Name     string `yaml:"name" json:"name"`
+	Operator string `yaml:"operator,omitempty" json:"operator,omitempty"`
+	Value    string `yaml:"value" json:"value"`
+}
+
+// EffectiveOperator returns the normalized matcher operator.
+func (m LabelMatcher) EffectiveOperator() string {
+	if m.Operator == "" {
+		return MatchEqual
+	}
+	return m.Operator
+}
+
+// ContainerMatchers accepts both the historical map form:
+//
+//	containerMatchers:
+//	  container: main
+//
+// and the operator-aware list form:
+//
+//	containerMatchers:
+//	  - name: container
+//	    operator: not_equal
+//	    value: POD
+type ContainerMatchers []LabelMatcher
+
+// UnmarshalYAML implements backward-compatible decoding.
+func (m *ContainerMatchers) UnmarshalYAML(node *yaml.Node) error {
+	switch node.Kind {
+	case yaml.MappingNode:
+		var raw map[string]string
+		if err := node.Decode(&raw); err != nil {
+			return err
+		}
+		out := make(ContainerMatchers, 0, len(raw))
+		for _, key := range sortedMapKeys(raw) {
+			out = append(out, LabelMatcher{Name: key, Operator: MatchEqual, Value: raw[key]})
+		}
+		*m = out
+		return nil
+	case yaml.SequenceNode:
+		type plain ContainerMatchers
+		var out plain
+		if err := node.Decode(&out); err != nil {
+			return err
+		}
+		*m = ContainerMatchers(out)
+		return nil
+	case 0:
+		*m = nil
+		return nil
+	default:
+		return fmt.Errorf("containerMatchers 必须是 map 或列表")
+	}
 }
 
 // PodSelector identifies the pods that belong to an application.
@@ -115,6 +187,9 @@ func (p PodSelector) PodLabelMetric() string {
 type Prometheus struct {
 	Job    string            `yaml:"job" json:"job"`
 	Labels map[string]string `yaml:"labels,omitempty" json:"labels,omitempty"`
+	// TargetLabels identify the scrape target for `up` checks. They are
+	// deliberately separate from application identity labels.
+	TargetLabels map[string]string `yaml:"targetLabels,omitempty" json:"targetLabels,omitempty"`
 }
 
 // ComponentPrometheus describes a dependency component's exact series selector.
@@ -124,10 +199,19 @@ type ComponentPrometheus struct {
 	Labels   map[string]string `yaml:"labels,omitempty" json:"labels,omitempty"`
 }
 
-// Skywalking contains the service mapping and optional endpoint format.
+// Skywalking contains the service mapping, endpoint format and optional UI
+// drill-down configuration.
 type Skywalking struct {
-	Service        string `yaml:"service" json:"service"`
-	EndpointFormat string `yaml:"endpointFormat,omitempty" json:"endpointFormat,omitempty"`
+	Service        string       `yaml:"service" json:"service"`
+	EndpointFormat string       `yaml:"endpointFormat,omitempty" json:"endpointFormat,omitempty"`
+	UI             SkywalkingUI `yaml:"ui,omitempty" json:"ui,omitempty"`
+}
+
+// SkywalkingUI configures application-specific SkyWalking UI drill-down.
+type SkywalkingUI struct {
+	BaseURL             string `yaml:"baseURL,omitempty" json:"baseURL,omitempty"`
+	ServiceURLTemplate  string `yaml:"serviceURLTemplate,omitempty" json:"serviceURLTemplate,omitempty"`
+	EndpointURLTemplate string `yaml:"endpointURLTemplate,omitempty" json:"endpointURLTemplate,omitempty"`
 }
 
 // Component is a non-application dependency such as MySQL, Redis or Kafka.
@@ -197,6 +281,12 @@ func Normalize(site *Site) {
 		if _, ok := app.Prometheus.Labels["namespace"]; !ok {
 			app.Prometheus.Labels["namespace"] = app.Namespace
 		}
+		if app.Prometheus.TargetLabels == nil {
+			app.Prometheus.TargetLabels = map[string]string{}
+		}
+		for key, value := range app.Prometheus.TargetLabels {
+			app.Prometheus.TargetLabels[key] = strings.TrimSpace(value)
+		}
 		if app.Kubernetes.PodSelector != nil {
 			ps := app.Kubernetes.PodSelector
 			ps.Mode = strings.TrimSpace(ps.Mode)
@@ -212,12 +302,18 @@ func Normalize(site *Site) {
 				ps.Matchers[key] = strings.TrimSpace(value)
 			}
 		}
-		if app.Kubernetes.ContainerMatchers == nil {
-			app.Kubernetes.ContainerMatchers = map[string]string{}
+		for j := range app.Kubernetes.ContainerMatchers {
+			matcher := &app.Kubernetes.ContainerMatchers[j]
+			matcher.Name = strings.TrimSpace(matcher.Name)
+			matcher.Operator = strings.TrimSpace(matcher.Operator)
+			matcher.Value = strings.TrimSpace(matcher.Value)
+			if matcher.Operator == "" {
+				matcher.Operator = MatchEqual
+			}
 		}
-		for key, value := range app.Kubernetes.ContainerMatchers {
-			app.Kubernetes.ContainerMatchers[key] = strings.TrimSpace(value)
-		}
+		app.Skywalking.UI.BaseURL = strings.TrimSpace(app.Skywalking.UI.BaseURL)
+		app.Skywalking.UI.ServiceURLTemplate = strings.TrimSpace(app.Skywalking.UI.ServiceURLTemplate)
+		app.Skywalking.UI.EndpointURLTemplate = strings.TrimSpace(app.Skywalking.UI.EndpointURLTemplate)
 	}
 
 	for i := range site.Spec.Components {

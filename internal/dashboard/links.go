@@ -57,37 +57,44 @@ func buildServicePanels(site *config.Site, links config.Links) []Panel {
 	if len(site.Spec.Applications) == 0 {
 		return nil
 	}
-	serviceTemplate := links.SkywalkingServiceURLTemplate
-	endpointTemplate := links.SkywalkingEndpointURLTemplate
-
 	lines := []string{"### SkyWalking 服务映射", ""}
-	if links.Skywalking == "" && serviceTemplate == "" && endpointTemplate == "" {
-		lines = append(lines,
-			"未配置 SkyWalking UI 地址。以下是 YAML 中声明的 Prometheus 应用与 SkyWalking Service 映射关系；配置 `spec.links.skywalking` 后可从这里下钻。", "")
-	}
+	anyBase, anyServiceTemplate, anyEndpointTemplate := false, false, false
 	for _, app := range site.Spec.Applications {
+		resolved := resolveSkywalkingLinks(links, app)
+		if resolved.baseURL != "" {
+			anyBase = true
+		}
+		if resolved.serviceTemplate != "" {
+			anyServiceTemplate = true
+		}
+		if resolved.endpointTemplate != "" {
+			anyEndpointTemplate = true
+		}
 		line := fmt.Sprintf("- `%s/%s` → SkyWalking Service `%s`",
 			markdownCode(app.Application), markdownCode(app.Namespace), markdownCode(app.Skywalking.Service))
-		if serviceTemplate != "" {
-			serviceURL := expandSkywalkingURL(serviceTemplate, site, app)
-			if serviceURL != "" {
+		if resolved.serviceTemplate != "" {
+			if serviceURL := expandSkywalkingURL(resolved.serviceTemplate, site, app); serviceURL != "" {
 				line += " · " + markdownLink("Service 页面", serviceURL)
 			}
-		} else if links.Skywalking != "" {
-			line += " · " + markdownLink("SkyWalking UI", links.Skywalking) + "（未配置 Service URL 模板）"
+		} else if resolved.baseURL != "" {
+			line += " · " + markdownLink("SkyWalking UI", resolved.baseURL) + "（未配置 Service URL 模板）"
 		}
 		lines = append(lines, line)
-		if endpointTemplate != "" {
-			if endpointURL := expandSkywalkingURL(endpointTemplate, site, app); endpointURL != "" {
+		if resolved.endpointTemplate != "" {
+			if endpointURL := expandSkywalkingURL(resolved.endpointTemplate, site, app); endpointURL != "" {
 				lines = append(lines, "  - "+markdownLink("Endpoint 页面", endpointURL))
 			}
 		}
 	}
-	if serviceTemplate == "" {
-		lines = append(lines, "", "未配置 `skywalkingServiceURLTemplate`；不会把 SkyWalking 首页伪装成具体 Service 页面。")
+	if !anyBase && !anyServiceTemplate && !anyEndpointTemplate {
+		lines = append(lines,
+			"未配置 SkyWalking UI 地址。以下是 YAML 中声明的 Prometheus 应用与 SkyWalking Service 映射关系；配置 `spec.links.skywalking` 或应用的 `skywalking.ui` 后可从这里下钻。", "")
 	}
-	if endpointTemplate == "" {
-		lines = append(lines, "", "未配置 `skywalkingEndpointURLTemplate`；不会生成 Endpoint 专属链接，请从 SkyWalking Service 页面进入 Endpoint 排行。")
+	if !anyServiceTemplate {
+		lines = append(lines, "", "未配置 Service URL 模板（`skywalkingServiceURLTemplate` 或应用级 `skywalking.ui.serviceURLTemplate`）；不会把 SkyWalking 首页伪装成具体 Service 页面。")
+	}
+	if !anyEndpointTemplate {
+		lines = append(lines, "", "未配置 Endpoint URL 模板（`skywalkingEndpointURLTemplate` 或应用级 `skywalking.ui.endpointURLTemplate`）；不会生成 Endpoint 专属链接，请从 SkyWalking Service 页面进入 Endpoint 排行。")
 	}
 	if format := defaultEndpointFormat(site); format != "" {
 		lines = append(lines, "", "YAML 声明的 Endpoint 维度格式：`"+markdownCode(format)+"`")
@@ -101,6 +108,33 @@ func buildServicePanels(site *config.Site, links config.Links) []Panel {
 		panels = append(panels, textPanel("YAML 配置依赖", content))
 	}
 	return panels
+}
+
+type resolvedSkywalkingLinks struct {
+	baseURL          string
+	serviceTemplate  string
+	endpointTemplate string
+}
+
+// resolveSkywalkingLinks prefers application-specific UI configuration and
+// falls back to the global tool configuration.
+func resolveSkywalkingLinks(global config.Links, app config.Application) resolvedSkywalkingLinks {
+	out := resolvedSkywalkingLinks{
+		baseURL:          global.Skywalking,
+		serviceTemplate:  global.SkywalkingServiceURLTemplate,
+		endpointTemplate: global.SkywalkingEndpointURLTemplate,
+	}
+	ui := app.Skywalking.UI
+	if ui.BaseURL != "" {
+		out.baseURL = ui.BaseURL
+	}
+	if ui.ServiceURLTemplate != "" {
+		out.serviceTemplate = ui.ServiceURLTemplate
+	}
+	if ui.EndpointURLTemplate != "" {
+		out.endpointTemplate = ui.EndpointURLTemplate
+	}
+	return out
 }
 
 func explicitDependencyLines(site *config.Site) []string {

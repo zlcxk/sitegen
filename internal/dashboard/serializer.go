@@ -208,13 +208,16 @@ func validateVariables(d *Dashboard) error {
 			return fmt.Errorf("Dashboard 变量 %q 没有被任何面板或变量查询使用；不允许保留装饰性变量", name)
 		}
 	}
-	if defined["pod"] && !defined["app_selector"] {
-		return fmt.Errorf("变量 pod 依赖 app_selector，但 app_selector 未定义")
-	}
-	if defined["pod"] {
-		query := queries["pod"]
-		if !dashboardVarRE.MatchString(query) || !strings.Contains(query, "app_selector") {
-			return fmt.Errorf("变量 pod 必须依赖 app_selector，确保只显示当前应用关联的 Pod")
+	for name, query := range queries {
+		if !strings.HasSuffix(name, "_pod") {
+			continue
+		}
+		selector := strings.TrimSuffix(name, "_pod") + "_app_selector"
+		if !defined[selector] {
+			return fmt.Errorf("变量 %s 依赖 %s，但该应用选择变量未定义", name, selector)
+		}
+		if !strings.Contains(query, selector) {
+			return fmt.Errorf("变量 %s 必须依赖 %s，确保只显示当前应用关联的 Pod", name, selector)
 		}
 	}
 	return nil

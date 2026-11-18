@@ -65,7 +65,7 @@ site-observability/
 │   ├── cli/            # Cobra 命令、交互式向导、终端输入
 │   ├── config/         # YAML 模型、严格解码、关联校验、原子写入
 │   ├── discovery/      # Prometheus API、认证、TLS、超时
-│   ├── metrics/        # 模板注册表、选择器、Prometheus 校验
+│   ├── metrics/        # 模板注册表、Selector、PromQL AST 改写、Prometheus 校验
 │   ├── dashboard/      # 强类型 Grafana JSON 构建、变量、布局、链接
 │   └── output/         # 原子文件写入、校验报告
 ├── templates/
@@ -128,10 +128,19 @@ spec:
         labels:
           application: rtd-admin
           namespace: test
+        # 仅用于 up 指标的目标标签；默认只使用 job。
+        # 不要把 application/namespace 放进 targetLabels。
+        targetLabels:
+          cluster: test-cluster
 
       skywalking:
         service: rtd-admin_test
         endpointFormat: "{method}:{uri}"
+        # 可选：应用级 SkyWalking UI 下钻配置，优先于全局 links。
+        ui:
+          baseURL: "https://skywalking.example.com"
+          serviceURLTemplate: "https://skywalking.example.com/service?name={service}"
+          endpointURLTemplate: "https://skywalking.example.com/endpoint?name={service}"
 
       metrics: [http, jvm, kubernetes]
 
@@ -143,8 +152,14 @@ spec:
           metric: kube_pod_labels
           matchers:
             label_app: rtd-admin
-        # 可选。未配置时会输出 WARN，且不会硬编码 container 过滤条件。
-        containerMatchers: {}
+        # 支持 equal/not_equal/regex/not_regex；旧的 map 写法仍然兼容。
+        containerMatchers:
+          - name: container
+            operator: not_equal
+            value: POD
+          - name: image
+            operator: not_equal
+            value: ""
 
       dependencies: [user-center-test, mysql-test, redis-test]
 
@@ -158,9 +173,11 @@ spec:
       metrics: [mysql-basic]
 ```
 
-每个应用对象都以完整 Selector 参与查询：`application`、`namespace`、`job` 和该应用自己的全部额外标签。多应用聚合不会把标签正则简单拼接，而是先按应用对象逐一编译精确 Selector，再用 `or` 合并；因此不会出现 `app-a + dev` 这类配置中不存在的交叉组合。
+每个应用对象都以完整 Selector 参与查询：`application`、`namespace`、`job` 和该应用自己的全部额外标签。多应用聚合通过 PromQL AST 改写完成：先按应用对象逐一复制原始函数（如 `rate()`/`increase()`），保留原始 Range Vector Selector，再合并各应用的即时向量，最后由外层 `sum`/`sum by`/`topk`/`histogram_quantile` 统一聚合。**不会**把 `[5m]` 改写成 `[5m:]` Subquery，也不会把全局聚合变成分应用聚合。
 
-Kubernetes 指标不使用 Namespace 全量查询。应用必须通过 `kubernetes.podSelector` 声明 Pod 归属，Builder 会使用 `kube_pod_labels`（或经过验证的 `pod-regex` 兼容模式）与 cAdvisor 指标按 `namespace + pod` 关联。未配置 Pod 归属的应用会跳过应用级 Kubernetes 面板并输出 WARN。
+`up` 指标只使用 `job` 和显式配置的 `targetLabels`。`application`、`namespace` 属于应用指标身份标签，不会被自动加入 `up` 查询，因此 Checker 与 Dashboard 的采集状态选择条件保持一致。
+
+Kubernetes 指标不使用 Namespace 全量查询。应用必须通过 `kubernetes.podSelector` 声明 Pod 归属，Builder 会使用 `kube_pod_labels`（或经过验证的 `pod-regex` 兼容模式）与 cAdvisor 指标按 `namespace + pod` 关联。`containerMatchers` 支持 `equal`、`not_equal`、`regex`、`not_regex`；旧版 `{container: main}` 会被识别为等值匹配。未配置 Pod 归属的应用会跳过应用级 Kubernetes 面板并输出 WARN，且不会重复输出容器过滤警告。
 
 JSON Schema 位于 [schemas/site.schema.json](schemas/site.schema.json)，可用于编辑器补全。加载器本身仍会执行严格字段检查和跨对象校验。
 
@@ -209,12 +226,16 @@ JSON Schema 位于 [schemas/site.schema.json](schemas/site.schema.json)，可用
 `sitegen create` 依次收集：
 
 1. 站点元数据；
-2. 域名（可多个，至少一个），Blackbox Job / Instance；
+2. 域名（可多个，至少一个），Blackbox Job / Instance，以及域名的入口应用；
 3. 应用（可多个），兼容同名应用位于不同 Namespace；
 4. 每个应用的 Prometheus Job、额外标签、SkyWalking Service（可自动生成）、Endpoint 格式和指标模板；
-5. 依赖组件（MySQL / Redis / Kafka / Nacos / 自定义）；
-6. 每个应用的显式依赖关系；
-7. 配置预览和写入确认。
+5. 启用 `kubernetes` 的应用继续配置 Pod 归属方式（标签匹配 / Pod 名称正则 / 暂不配置），以及可选的容器过滤条件；
+6. 可选的 `prometheus.targetLabels`（仅用于 `up`）和 SkyWalking UI 下钻配置；
+7. 依赖组件（MySQL / Redis / Kafka / Nacos / 自定义）；
+8. 每个应用的显式依赖关系；
+9. 配置预览和写入确认。
+
+`edit` 会对已有应用逐一询问是否保留 Pod 归属、容器过滤、Target Labels 和 SkyWalking UI 配置；选择不保留时重新收集。
 
 配置先完整校验，再通过临时文件 + 原子替换写入；覆盖已有文件时保留 `.bak` 备份。用户中断不会写出半成品。
 
@@ -242,11 +263,12 @@ JSON Schema 位于 [schemas/site.schema.json](schemas/site.schema.json)，可用
 - **不虚构指标名**。未在目标 Prometheus 中确认的指标不加入模板；JVM GC/Threads 等暂不提供面板。
 - 所有模板都有 `requiredMetrics` / `requiredLabels`，`check` 会按标签统计实际覆盖数量；必需标签不完整时直接 FAIL。
 - HTTP 查询以应用对象为最小单位，使用完整精确 Selector；站点总览只汇总 `entryApplications` 中启用 HTTP 的入口应用。
+- `platform` 的 `up` 查询只使用 `job` 与 `prometheus.targetLabels`，不会自动加入 application/namespace。
 - 慢接口 Top 10 使用 `application + namespace + method + uri` 的 P95，并通过速率阈值（> 1/60 reqps）过滤低流量接口；OPTIONS 默认排除。
 - 延迟统一以毫秒展示；PromQL 已乘以 1000，Grafana 单位固定为 `ms`。
 - 组件查询使用 YAML 中的 Job、Instance 和额外标签精确筛选。
 - 指标模板按应用启用范围生成：未启用 HTTP 的应用不会进入 HTTP 查询；未启用 JVM 的应用不会进入 JVM 查询。
-- 站点级汇总不使用 `$app_selector`，应用级详细面板使用单选 `$app_selector`；第一版不允许应用对象再次被独立组合。
+- 站点级汇总只使用配置中的入口应用，不依赖应用选择变量；HTTP/JVM/Kubernetes 详细面板分别使用 `$http_app_selector`、`$jvm_app_selector`、`$k8s_app_selector`，不允许选择未启用对应 Profile 的应用。
 
 ---
 
@@ -327,13 +349,19 @@ SITEGEN_CONFIG
 
 ### 变量
 
+各指标区域使用独立的应用选择变量，只包含启用了对应 Profile 的应用：
+
 - `$datasource`：Prometheus 数据源。
-- `$app_selector`：**单选**应用实例，每个选项对应一个唯一的 Application/Namespace/Job/额外标签组合；应用级面板必须引用它。
-- `$pod`：由当前 `$app_selector` 关联的 Pod 集合产生（JVM 的 `pod` 标签，以及 `kube_pod_labels` / `pod-regex` 对应的容器序列）；JVM 与 Kubernetes 面板共享同一 Pod 归属。仅有 HTTP 的站点不会生成无用的 `$pod` 变量。
+- `$http_app_selector`：仅包含启用 `http` 的应用。
+- `$jvm_app_selector`：仅包含启用 `jvm` 的应用。
+- `$k8s_app_selector`：仅包含启用 `kubernetes` 且配置了 `podSelector` 的应用。
+- `$jvm_pod` / `$k8s_pod`：分别由对应应用选择器关联的 Pod 集合产生。
+
+每个选项文本为 `Application / Namespace`，值为唯一应用配置 ID；同名应用跨 Namespace 时可以独立选择。没有对应 Profile 的应用不会出现在该区域的选择列表中，因此不会因为变量范围不一致出现误导性的 No Data。
 
 不生成 `$component`、`$instance` 等无实际查询作用的变量。Dashboard 校验会拒绝未被任何面板或变量查询引用的变量。
 
-应用级查询在生成时把每个应用对象的完整精确 Selector 编译进 PromQL，并通过派生标签 `sitegen_app` 过滤 `$app_selector`。变量值使用 Grafana 的 JSON 转义格式插值，URL 手工覆盖既不能注入 PromQL，也无法匹配站点之外的应用，只会得到空结果。默认时间范围 1 小时，刷新 30 秒。
+应用级查询在生成时把每个应用对象的完整精确 Selector 编译进 PromQL，并通过派生标签 `sitegen_app` 过滤对应的 Profile 选择变量。变量值使用 Grafana 的 JSON 转义格式插值，URL 手工覆盖既不能注入 PromQL，也无法匹配站点之外的应用，只会得到空结果。默认时间范围 1 小时，刷新 30 秒。
 
 ### 稳定性和安全
 
@@ -376,16 +404,20 @@ make generate-example
 
 - YAML 严格解码、未知字段路径、ID/依赖/SkyWalking 校验、原子写入与备份；
 - 模板注册表加载与占位符校验；
-- Dashboard 确定性、变量、面板 ID、布局、JSON 校验；
+- PromQL AST 改写：Range Selector 保持、无 Subquery、Histogram/TopK 聚合语义、多应用联合；
+- 使用 Prometheus 官方 PromQL 引擎在可重复数据集上执行生成查询，校验 rate/increase、P95/P99、平均延迟与 Counter Reset 结果；
+- `up` Selector 只使用 job/targetLabels，Checker 与 Builder 一致；
+- 容器 Matcher operator、旧 map 兼容、Kubernetes 指标覆盖与容器过滤校验；
+- Dashboard 确定性、按 Profile 的应用变量、面板 ID、布局、JSON 校验；
 - Prometheus 客户端认证、401、超时/端点校验；
-- 校验器对缺失指标、无数据、标签缺失、PromQL 错误的分类；
-- CLI 批量失败继续、build 失败保留旧 Dashboard、交互式创建流程。
+- 校验器对缺失指标、无数据、标签缺失、Pod 归属失败、PromQL 错误的分类；
+- CLI 批量失败继续、build 失败保留旧 Dashboard、交互式创建/编辑与 Kubernetes Pod 归属配置流程。
 
 ---
 
 ## 10. 版本与限制
 
-当前为 V1：
+当前为 V1.0.2：
 
 - 不提供 Web 后台、数据库、告警规则生成或自动发布；
 - 不修改 Prometheus Operator / ServiceMonitor / ScrapeConfig；
@@ -394,18 +426,20 @@ make generate-example
 - JVM 只包含已确认的 Heap 指标，GC/Threads 待真实环境验证后加入；
 - K8s 使用标准 cAdvisor / kube-state-metrics 指标，但仍应通过 `sitegen check` 在目标 Prometheus 上确认；
 - Nacos 仅验证 exporter 抓取状态，Kafka 仅展示 Broker 数，后续再扩展性能指标；
-- 应用由完整对象标识（application + namespace + job + 额外标签）；多应用聚合按对象逐一编译，不使用独立标签正则组合；
+- 应用由完整对象标识（application + namespace + job + 额外标签）；多应用聚合通过 PromQL AST 按对象逐一编译，不使用独立标签正则组合，也不会把 Range Selector 改为 Subquery；
+- `up` 只使用 `job` + `prometheus.targetLabels`，不自动加入 application/namespace；
 - 站点级外部请求汇总只统计域名 `entryApplications`，下游应用内部调用不会重复计入；
 - Kubernetes 应用级面板要求显式 `kubernetes.podSelector`；无法建立 Pod 归属时跳过面板并输出 WARN，绝不退化为 Namespace 全量查询；
-- Windows 下 cAdvisor/Java 标签结构差异较大，`containerMatchers` 必须根据目标 Prometheus 真实标签确认；
+- 不同环境 cAdvisor/Java 标签结构差异较大，`containerMatchers` 必须根据目标 Prometheus 真实标签确认；
 - Grafana 11.4 / 真实 Prometheus 的导入与查询验证必须在目标环境执行；没有真实 URL 时不能把 `generate` 或 `--skip-prometheus` 视为环境验收通过。
 
-### V1.0.1 配置迁移提示
+### V1.0.2 配置迁移提示
 
-- 如果站点启用了 `http`，在域名下补充 `entryApplications`；否则会输出 WARN，并跳过站点级外部请求汇总面板。
-- 如果应用启用了 `kubernetes`，补充 `kubernetes.podSelector`；否则该应用的 Kubernetes 面板会被跳过，避免 Namespace 全量查询。
-- `containerMatchers` 必须按目标 Prometheus 的真实标签结构配置；未配置时保留 WARN 提示。
-- Dashboard 变量已由 `$application` / `$namespace` 调整为单选 `$app_selector`，并删除 `$component` / `$instance`。重新生成后旧变量不再存在。
+- Dashboard 变量拆分为 `$http_app_selector`、`$jvm_app_selector`、`$k8s_app_selector`，以及 `$jvm_pod` / `$k8s_pod`。重新生成后旧的全局 `$app_selector` / `$pod` 不再存在。
+- `up` 指标默认只使用 `job`。如果采集目标需要额外区分，请配置 `prometheus.targetLabels`；不要把 `application`、`namespace` 放入 `targetLabels`。
+- `containerMatchers` 支持 operator 列表写法；旧的 map 写法继续兼容，并按 `equal` 处理。
+- 应用级 SkyWalking UI 配置使用 `skywalking.ui.baseURL` / `serviceURLTemplate` / `endpointURLTemplate`，并优先于全局 `links`。
+- 仅当 `kubernetes.podSelector` 存在时才提示容器过滤风险；未配置 Pod 归属时只提示“应用级 Kubernetes 面板不生成”，不会产生重复警告。
 - 旧 YAML 不会自动改写；`sitegen validate` 只输出提示，`sitegen create/edit` 才会在确认后写入。
 
 推荐上线流程：
