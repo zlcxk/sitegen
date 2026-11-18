@@ -122,22 +122,36 @@ type Templating struct {
 	List []Variable `json:"list"`
 }
 
+// Variable query type constants. Grafana 11.4 does not serialize a dedicated
+// queryType field for Prometheus variables; the type is encoded by the query
+// function (query_result / label_values) and the variable Type. Keeping it in
+// the model makes the generator's intent explicit and testable.
+const (
+	VariableQueryTypeCustom      = "custom"
+	VariableQueryTypeDatasource  = "datasource"
+	VariableQueryTypeQueryResult = "query_result"
+	VariableQueryTypeLabelValues = "label_values"
+)
+
 type Variable struct {
-	AllValue   string           `json:"allValue,omitempty"`
-	Current    VariableCurrent  `json:"current"`
-	Datasource *Datasource      `json:"datasource,omitempty"`
-	Definition string           `json:"definition,omitempty"`
-	Hide       int              `json:"hide"`
-	IncludeAll bool             `json:"includeAll,omitempty"`
-	Label      string           `json:"label,omitempty"`
-	Multi      bool             `json:"multi,omitempty"`
-	Name       string           `json:"name"`
-	Options    []VariableOption `json:"options,omitempty"`
-	Query      any              `json:"query"`
-	Regex      string           `json:"regex,omitempty"`
-	Refresh    int              `json:"refresh,omitempty"`
-	Sort       int              `json:"sort,omitempty"`
-	Type       string           `json:"type"`
+	AllValue     string           `json:"allValue,omitempty"`
+	Current      VariableCurrent  `json:"current"`
+	Datasource   *Datasource      `json:"datasource,omitempty"`
+	Definition   string           `json:"definition,omitempty"`
+	Hide         int              `json:"hide"`
+	IncludeAll   bool             `json:"includeAll,omitempty"`
+	Label        string           `json:"label,omitempty"`
+	Multi        bool             `json:"multi,omitempty"`
+	Name         string           `json:"name"`
+	Options      []VariableOption `json:"options,omitempty"`
+	Query        any              `json:"query"`
+	QueryType    string           `json:"-"` // internal, see constants above
+	Regex        string           `json:"regex,omitempty"`
+	RegexApplyTo string           `json:"regexApplyTo,omitempty"`
+	Refresh      int              `json:"refresh,omitempty"`
+	Sort         int              `json:"sort,omitempty"`
+	Type         string           `json:"type"`
+	ValuesFormat string           `json:"valuesFormat,omitempty"`
 }
 
 type VariableCurrent struct {

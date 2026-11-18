@@ -20,9 +20,17 @@ const (
 
 var promQLParser = parser.NewParser(parser.Options{})
 
-var grafanaJSONVarRE = regexp.MustCompile(`\$\{[A-Za-z_][A-Za-z0-9_]*:[a-z]+\}`)
-var grafanaVarRE = regexp.MustCompile(`\$\{[A-Za-z_][A-Za-z0-9_]*\}`)
-var grafanaBareVarRE = regexp.MustCompile(`\$[A-Za-z_][A-Za-z0-9_]*`)
+// Grafana variable tokens. The format suffix is context-sensitive:
+//   - "pod=~\"${pod:regex}\"" for Prometheus regex matchers
+//   - "\"${app_selector}\"" for PromQL string parameters
+//   - ":json" must never appear inside PromQL.
+var (
+	grafanaVarTokenRE      = regexp.MustCompile(`\$\{[A-Za-z_][A-Za-z0-9_]*(?::[a-z]+)?\}`)
+	quotedGrafanaVarRE     = regexp.MustCompile(`"(\$\{[A-Za-z_][A-Za-z0-9_]*(?::[a-z]+)?\})"`)
+	grafanaVarRE           = regexp.MustCompile(`\$\{[A-Za-z_][A-Za-z0-9_]*\}`)
+	grafanaBareVarRE       = regexp.MustCompile(`\$[A-Za-z_][A-Za-z0-9_]*`)
+	quotedGrafanaBareVarRE = regexp.MustCompile(`"(\$[A-Za-z_][A-Za-z0-9_]*)"`)
+)
 
 type queryScope int
 
@@ -229,8 +237,13 @@ func restoreGrafanaTokens(query, selectorVar, podVar string) string {
 	if selectorVar == "" {
 		selectorVar = "app_selector"
 	}
-	out := strings.ReplaceAll(query, QuoteLabelValue(podJSONSentinel), "${"+podVar+":json}")
-	out = strings.ReplaceAll(out, QuoteLabelValue(appSelectorJSONSentinel), "${"+selectorVar+":json}")
+	// The sentinels are rendered as quoted string literals by the AST. Keep
+	// them quoted and use the context-correct Grafana format:
+	//   - Pod matchers are regex matchers: "${k8s_pod:regex}"
+	//   - app IDs are PromQL string parameters: "${http_app_selector}"
+	// Never emit :json here; a JSON array is not a PromQL string literal.
+	out := strings.ReplaceAll(query, QuoteLabelValue(podJSONSentinel), QuoteLabelValue("${"+podVar+":regex}"))
+	out = strings.ReplaceAll(out, QuoteLabelValue(appSelectorJSONSentinel), QuoteLabelValue("${"+selectorVar+"}"))
 	return out
 }
 
@@ -442,6 +455,11 @@ func appMatchers(metricName string, original []*labels.Matcher, app config.Appli
 		if err := addEqual("namespace", app.Namespace); err != nil {
 			return nil, err
 		}
+		// Two pod conditions can coexist intentionally:
+		//   1. podJSONSentinel -> Grafana Pod variable (user Pod selection)
+		//   2. static podSelector.Pod -> application ownership in pod-regex mode
+		// They are an intersection (app-owned pods AND the selected pod), not
+		// the same matcher appended twice. Each source appends exactly once.
 		podMatcher, err := labels.NewMatcher(labels.MatchRegexp, "pod", podJSONSentinel)
 		if err != nil {
 			return nil, err

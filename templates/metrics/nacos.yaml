@@ -5,6 +5,9 @@ profiles:
     target: component
     scope: component
     componentTypes: [nacos]
+    discovery:
+      metric: up
+      groupBy: [job, instance]
     panels:
       - id: nacos-exporter-up
         name: Nacos Exporter 可达性

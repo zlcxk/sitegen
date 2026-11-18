@@ -65,14 +65,14 @@ func profileHasPanelVariable(profile *metrics.Profile) bool {
 
 func datasourceVariable() Variable {
 	return Variable{
-		Current:    VariableCurrent{Selected: false, Text: "", Value: ""},
-		Definition: "prometheus",
-		Hide:       0,
-		Label:      "数据源",
-		Name:       datasourceVarName,
-		Query:      "prometheus",
-		Refresh:    1,
-		Type:       "datasource",
+		Current:   VariableCurrent{Selected: false, Text: "", Value: ""},
+		Hide:      0,
+		Label:     "数据源",
+		Name:      datasourceVarName,
+		Query:     "prometheus",
+		QueryType: VariableQueryTypeDatasource,
+		Refresh:   1,
+		Type:      "datasource",
 	}
 }
 
@@ -96,15 +96,16 @@ func appSelectorVariable(profileID, name string, apps []config.Application) Vari
 		Value:    apps[0].ID,
 	}
 	return Variable{
-		Current:    current,
-		Definition: strings.Join(values, ","),
-		Hide:       0,
-		Label:      label,
-		Multi:      false,
-		Name:       name,
-		Options:    options,
-		Query:      strings.Join(values, ","),
-		Type:       "custom",
+		Current:      current,
+		Hide:         0,
+		Label:        label,
+		Multi:        false,
+		Name:         name,
+		Options:      options,
+		Query:        strings.Join(values, ","),
+		QueryType:    VariableQueryTypeCustom,
+		Type:         "custom",
+		ValuesFormat: "csv",
 	}
 }
 
@@ -145,20 +146,22 @@ func buildPodVariable(site *config.Site, profileID, selectorVar string) (*Variab
 	// application identity filter.
 	query := "query_result(" + expression + ")"
 	return &Variable{
-		AllValue:   ".*",
-		Current:    allCurrent(),
-		Datasource: &Datasource{Type: "prometheus", UID: datasourceUID},
-		Definition: query,
-		Hide:       0,
-		IncludeAll: true,
-		Label:      podVariableLabel(profileID),
-		Multi:      false,
-		Name:       metrics.ProfilePodVar(profileID),
-		Query:      query,
-		Regex:      `/pod="([^"]+)"/`,
-		Refresh:    2,
-		Sort:       1,
-		Type:       "query",
+		AllValue:     ".*",
+		Current:      allCurrent(),
+		Datasource:   &Datasource{Type: "prometheus", UID: datasourceUID},
+		Definition:   query,
+		Hide:         0,
+		IncludeAll:   true,
+		Label:        podVariableLabel(profileID),
+		Multi:        false,
+		Name:         metrics.ProfilePodVar(profileID),
+		Query:        query,
+		QueryType:    VariableQueryTypeQueryResult,
+		Regex:        `/pod="([^"]+)"/`,
+		RegexApplyTo: "value",
+		Refresh:      2,
+		Sort:         1,
+		Type:         "query",
 	}, nil
 }
 

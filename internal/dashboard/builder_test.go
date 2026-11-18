@@ -354,7 +354,7 @@ func TestKubernetesCPUAndMemoryShareFilters(t *testing.T) {
 			`image!=""`,
 			`kube_pod_labels`,
 			`label_app="rtd-admin"`,
-			`pod=~${k8s_pod:json}`,
+			`pod=~"${k8s_pod:regex}"`,
 		} {
 			if !strings.Contains(expr, want) {
 				t.Errorf("%s missing shared filter %q:\n%s", title, want, expr)
@@ -500,6 +500,95 @@ func TestMissingPodSelectorDoesNotEmitContainerWarning(t *testing.T) {
 	}
 	if len(findByTitle(d, "容器过滤条件提示")) != 0 {
 		t.Fatal("container matcher warning must not be emitted when no podSelector exists")
+	}
+}
+
+func TestGeneratedDashboardVariableFormats(t *testing.T) {
+	site, reg := loadExample(t)
+	data, err := BuildJSON(site, reg, config.Links{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	if strings.Contains(text, `:json`) {
+		t.Fatal("generated dashboard must not use :json inside PromQL")
+	}
+	if strings.Contains(text, `pod=~${`) {
+		t.Fatal("pod regex matcher must be quoted")
+	}
+	d := buildDashboard(t, site, reg, config.Links{})
+	joined := strings.Join(exprs(d), "\n")
+	if !strings.Contains(joined, `pod=~"${k8s_pod:regex}"`) {
+		t.Fatal("missing quoted k8s pod regex variable")
+	}
+	if !strings.Contains(joined, `pod=~"${jvm_pod:regex}"`) {
+		t.Fatal("missing quoted JVM pod regex variable")
+	}
+	if !strings.Contains(joined, `"${k8s_app_selector}"`) ||
+		!strings.Contains(joined, `"${jvm_app_selector}"`) {
+		t.Fatal("application selector must be used as a quoted PromQL string")
+	}
+}
+
+func TestVariableQueryTypesAndDatasource(t *testing.T) {
+	site, reg := loadExample(t)
+	d, err := Build(site, reg, config.Links{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	vars := map[string]Variable{}
+	for _, variable := range d.Templating.List {
+		vars[variable.Name] = variable
+	}
+	if vars["datasource"].QueryType != VariableQueryTypeDatasource {
+		t.Errorf("datasource query type = %q", vars["datasource"].QueryType)
+	}
+	for _, name := range []string{"http_app_selector", "jvm_app_selector", "k8s_app_selector"} {
+		variable := vars[name]
+		if variable.QueryType != VariableQueryTypeCustom {
+			t.Errorf("%s query type = %q", name, variable.QueryType)
+		}
+		if variable.ValuesFormat != "csv" {
+			t.Errorf("%s valuesFormat = %q", name, variable.ValuesFormat)
+		}
+	}
+	for _, name := range []string{"jvm_pod", "k8s_pod"} {
+		variable := vars[name]
+		if variable.QueryType != VariableQueryTypeQueryResult {
+			t.Errorf("%s query type = %q", name, variable.QueryType)
+		}
+		if variable.RegexApplyTo != "value" {
+			t.Errorf("%s regexApplyTo = %q", name, variable.RegexApplyTo)
+		}
+		if variable.Datasource == nil || variable.Datasource.UID != "${datasource}" {
+			t.Errorf("%s datasource = %#v", name, variable.Datasource)
+		}
+		if !strings.HasPrefix(variable.Definition, "query_result(") {
+			t.Errorf("%s definition is not query_result: %s", name, variable.Definition)
+		}
+	}
+}
+
+func TestPodRegexMatchersAreNotDuplicated(t *testing.T) {
+	site, reg := loadExample(t)
+	for i := range site.Spec.Applications {
+		site.Spec.Applications[i].Kubernetes.PodSelector = &config.PodSelector{
+			Mode: config.PodSelectorPodRegex,
+			Pod:  "^" + site.Spec.Applications[i].Application + "-.*$",
+		}
+	}
+	d := buildDashboard(t, site, reg, config.Links{})
+	for _, panel := range findByTitle(d, "Pod CPU") {
+		expr := panel.Targets[0].Expr
+		if count := strings.Count(expr, `pod=~"${k8s_pod:regex}"`); count != len(site.Spec.Applications) {
+			t.Fatalf("dynamic pod matcher count = %d, want %d:\n%s", count, len(site.Spec.Applications), expr)
+		}
+		for _, app := range site.Spec.Applications {
+			static := `pod=~"^` + app.Application + `-.*$"`
+			if count := strings.Count(expr, static); count != 1 {
+				t.Fatalf("static pod matcher %q count = %d:\n%s", static, count, expr)
+			}
+		}
 	}
 }
 

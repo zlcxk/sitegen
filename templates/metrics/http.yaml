@@ -4,6 +4,10 @@ profiles:
     name: HTTP RED
     target: application
     scope: application
+    discovery:
+      metric: http_server_requests_seconds_count
+      groupBy: [application, namespace, job]
+      labels: [method, status, uri]
     panels:
       # ---------------------------------------------------------------------
       # Row 1: site health overview. These panels aggregate ONLY the

@@ -4,6 +4,10 @@ profiles:
     name: Kubernetes Workload
     target: application
     scope: namespace
+    discovery:
+      metric: container_memory_working_set_bytes
+      groupBy: [namespace, pod]
+      labels: [container, image, name, id]
     panels:
       # The builder adds the exact namespace, the application's pod ownership
       # constraint (kube_pod_labels or pod-regex) and optional container

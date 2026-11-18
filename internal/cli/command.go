@@ -111,6 +111,7 @@ func (a *app) rootCommand() *cobra.Command {
 	root.AddCommand(a.createCommand(opts))
 	root.AddCommand(a.editCommand(opts))
 	root.AddCommand(a.validateCommand(opts))
+	root.AddCommand(a.discoverCommand(opts))
 	root.AddCommand(a.checkCommand(opts))
 	root.AddCommand(a.generateCommand(opts))
 	root.AddCommand(a.buildCommand(opts))
@@ -181,15 +182,48 @@ func (a *app) createCommand(opts *rootOptions) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			client := a.bestEffortClient(opts.configPath, promURL, timeoutRaw)
+			probe := ClusterProbe(nil)
+			if client != nil {
+				probe = client
+			}
 			wizard := &Wizard{
 				Prompter: prompter,
 				Registry: reg,
 				Out:      a.out,
-				Probe:    a.bestEffortProbe(opts.configPath, promURL, timeoutRaw),
+				Probe:    probe,
 				SitesDir: opts.sitesDir,
 				Resume:   resume,
 			}
-			site, err := wizard.Create()
+			var site *config.Site
+			if resume != nil {
+				site, err = wizard.Create()
+			} else if client != nil {
+				mode, selectErr := prompter.Select("站点配置创建", []string{
+					"自动发现并创建（推荐）",
+					"手动配置（连接 Prometheus 辅助校验）",
+					"离线创建（不连接 Prometheus）",
+				}, 0)
+				if selectErr != nil {
+					return selectErr
+				}
+				switch mode {
+				case 0:
+					site, err = a.autoCreate(wizard, client)
+					if errors.Is(err, errUseManual) {
+						site, err = wizard.Create()
+					}
+				case 1:
+					site, err = wizard.Create()
+				default:
+					wizard.Probe = nil
+					site, err = wizard.Create()
+				}
+			} else {
+				fmt.Fprintln(a.out, "未配置 Prometheus，进入手动配置。")
+				wizard.Probe = nil
+				site, err = wizard.Create()
+			}
 			if err != nil {
 				return err
 			}
@@ -317,17 +351,8 @@ func (a *app) chooseDraft(prompter Prompter, sitesDir string) (*Draft, string, e
 // bestEffortProbe builds an optional Prometheus client for wizard-time
 // discovery. Failures are reported as hints, never as wizard failures.
 func (a *app) bestEffortProbe(configPath, promURL, timeoutRaw string) ClusterProbe {
-	tool, _, err := config.LoadToolConfig(configPath)
-	if err != nil {
-		return nil
-	}
-	promCfg, available, err := resolvePromConfig(promURL, timeoutRaw, tool)
-	if err != nil || !available {
-		return nil
-	}
-	client, err := discovery.NewClient(promCfg)
-	if err != nil {
-		fmt.Fprintf(a.errOut, "提示: 无法创建向导用 Prometheus 客户端: %v\n", err)
+	client := a.bestEffortClient(configPath, promURL, timeoutRaw)
+	if client == nil {
 		return nil
 	}
 	return client
@@ -405,6 +430,7 @@ func (a *app) checkCommand(opts *rootOptions) *cobra.Command {
 				skipReason:   "未配置 Prometheus URL",
 				reportDir:    opts.reportsDir,
 				dashboardDir: opts.dashboardsDir,
+				links:        tool.Links,
 				lookback:     lookback,
 				concurrency:  concurrency,
 			}
@@ -644,6 +670,17 @@ func (a *app) processSite(ctx context.Context, path string, reg *metrics.Registr
 		return report, nil
 	}
 
+	// check validates the generated variable model without writing a dashboard.
+	// build/generate add the same checks after the dashboard is built below.
+	if action.checkProm && !action.generate {
+		links := config.MergeLinks(action.links, site.Spec.Links)
+		if d, err := dashboard.Build(site, reg, links); err != nil {
+			report.Add("Dashboard 变量", "静态生成", output.Fail, err.Error())
+		} else {
+			addDashboardVariableChecks(report, d)
+		}
+	}
+
 	if action.checkProm {
 		switch {
 		case action.skipProm:
@@ -688,6 +725,7 @@ func (a *app) processSite(ctx context.Context, path string, reg *metrics.Registr
 		}
 		report.DashboardPath = dashboardPath
 		report.Add("Dashboard", "结构校验与原子写入", output.Pass, "已写入 "+dashboardPath)
+		addDashboardVariableChecks(report, d)
 	}
 	if action.deferEnvironmentCheck {
 		report.DeferredEnvironmentCheck = true
@@ -700,6 +738,114 @@ func (a *app) processSite(ctx context.Context, path string, reg *metrics.Registr
 	}
 	a.printReport(report, reportPath)
 	return report, nil
+}
+
+// addDashboardVariableChecks verifies the generated variable model and all
+// panel matchers without pretending that Grafana browser interpolation has
+// been tested. The final WARN is intentional: only a real Grafana import and
+// variable switch can prove the browser-side chain end to end.
+func addDashboardVariableChecks(report *output.Report, d *dashboard.Dashboard) {
+	if d == nil {
+		return
+	}
+	var modelIssues []string
+	podVariables := 0
+	for _, variable := range d.Templating.List {
+		switch variable.QueryType {
+		case dashboard.VariableQueryTypeCustom:
+			if variable.Multi {
+				modelIssues = append(modelIssues, variable.Name+" 不是单选变量")
+			}
+			if len(variable.Options) == 0 {
+				modelIssues = append(modelIssues, variable.Name+" 没有选项")
+			}
+			if variable.ValuesFormat != "csv" {
+				modelIssues = append(modelIssues, variable.Name+" valuesFormat 不是 csv")
+			}
+		case dashboard.VariableQueryTypeQueryResult:
+			podVariables++
+			if variable.Datasource == nil || variable.Datasource.UID != "${datasource}" {
+				modelIssues = append(modelIssues, variable.Name+" 未绑定 Dashboard 数据源")
+			}
+			if variable.RegexApplyTo != "value" {
+				modelIssues = append(modelIssues, variable.Name+" regexApplyTo 不是 value")
+			}
+			if variable.AllValue == "" {
+				modelIssues = append(modelIssues, variable.Name+" 缺少 AllValue")
+			}
+			query, _ := variable.Query.(string)
+			if !strings.HasPrefix(query, "query_result(") {
+				modelIssues = append(modelIssues, variable.Name+" 查询类型不是 query_result")
+			}
+			if strings.Contains(query, ":json") {
+				modelIssues = append(modelIssues, variable.Name+" 查询仍使用 :json")
+			}
+		}
+	}
+	if len(modelIssues) == 0 {
+		report.Add("Dashboard 变量", "变量模型", output.Pass,
+			fmt.Sprintf("Profile 应用变量为单选 custom，%d 个 Pod 变量使用 query_result，AllValue 与数据源绑定合法", podVariables))
+		for _, variable := range d.Templating.List {
+			switch variable.QueryType {
+			case dashboard.VariableQueryTypeCustom:
+				report.Add("Dashboard 变量", variable.Name, output.Pass,
+					fmt.Sprintf("单选 custom 变量，包含 %d 个应用选项", len(variable.Options)))
+			case dashboard.VariableQueryTypeQueryResult:
+				report.Add("Dashboard 变量", variable.Name+" 定义", output.Pass,
+					"query_result 查询，regexApplyTo=value，AllValue=.*")
+			}
+		}
+	} else {
+		report.Add("Dashboard 变量", "变量模型", output.Fail, strings.Join(modelIssues, "；"))
+	}
+
+	var exprs []string
+	var walk func([]dashboard.Panel)
+	walk = func(panels []dashboard.Panel) {
+		for _, panel := range panels {
+			for _, target := range panel.Targets {
+				exprs = append(exprs, target.Expr)
+			}
+			if panel.Panels != nil {
+				walk(*panel.Panels)
+			}
+		}
+	}
+	walk(d.Panels)
+
+	var matcherIssues []string
+	for _, expr := range exprs {
+		if strings.Contains(expr, ":json") {
+			matcherIssues = append(matcherIssues, "存在 :json 变量")
+		}
+		if strings.Contains(expr, "=~${") || strings.Contains(expr, "!~${") {
+			matcherIssues = append(matcherIssues, "正则 Matcher 变量未加双引号")
+		}
+	}
+	if len(matcherIssues) == 0 {
+		report.Add("Dashboard 变量", "Pod Matcher", output.Pass,
+			"未发现 :json 或未加引号的正则变量；静态 Pod 归属与动态 Pod 选择分别生成")
+	} else {
+		report.Add("Dashboard 变量", "Pod Matcher", output.Fail,
+			strings.Join(sortedUniqueStrings(matcherIssues), "；"))
+	}
+
+	report.Add("Dashboard 变量", "Grafana 实际插值", output.Warn,
+		"尚未在目标 Grafana 中导入并切换应用/Pod；当前仅完成生成模型与 Prometheus 展开查询校验")
+}
+
+func sortedUniqueStrings(values []string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		if seen[value] {
+			continue
+		}
+		seen[value] = true
+		out = append(out, value)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func (a *app) failWithReport(report *output.Report, reportPath string, cause error) error {

@@ -5,6 +5,9 @@ profiles:
     target: component
     scope: component
     componentTypes: [redis]
+    discovery:
+      metric: redis_up
+      groupBy: [job, instance]
     panels:
       - id: redis-up
         name: Redis 连接状态

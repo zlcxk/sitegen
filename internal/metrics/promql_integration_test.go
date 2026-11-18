@@ -127,9 +127,7 @@ func TestRenderedSingleApplicationFilterMatchesOnlyThatApp(t *testing.T) {
 	apps := site.Spec.Applications[:2]
 	query := compactPromQL(renderApp(t,
 		"sum(rate(http_server_requests_seconds_count{%SELECTOR%}[5m]))", apps, true, "http_app_selector"))
-	query = grafanaJSONVarRE.ReplaceAllStringFunc(query, func(string) string {
-		return QuoteLabelValue("app-a-test")
-	})
+	query = RenderCheckQuery(query, site, "")
 	script := `
 load 15s
   http_server_requests_seconds_count{application="app-a",namespace="test",job="job-a",team="a"} 0+10x20

@@ -96,6 +96,12 @@ func validateProfile(p *Profile) error {
 				return fmt.Errorf("%s: 不支持的模板占位符 %s", path, token)
 			}
 		}
+		if strings.Contains(pn.Query, ":json") {
+			return fmt.Errorf("%s: Grafana :json 变量不能用于 PromQL；字符串参数使用 \"${var}\"，正则 Matcher 使用 \"${var:regex}\"", path)
+		}
+		if unquotedRegexVarRE.MatchString(pn.Query) {
+			return fmt.Errorf("%s: 正则 Matcher 中的变量必须放在双引号内并使用 :regex，例如 pod=~\"${pod:regex}\"", path)
+		}
 		for _, match := range varRE.FindAllStringSubmatch(pn.Query, -1) {
 			name := match[1]
 			if allowedVars[name] || strings.HasSuffix(name, "_pod") || strings.HasSuffix(name, "_app_selector") {
@@ -122,6 +128,26 @@ func validateProfile(p *Profile) error {
 		}
 		if err := validateThresholds(pn.Thresholds); err != nil {
 			return fmt.Errorf("%s: %w", path, err)
+		}
+	}
+	if p.Discovery != nil {
+		if !metricNameRE.MatchString(p.Discovery.Metric) {
+			return fmt.Errorf("profile %s: discovery.metric %q 非法", p.ID, p.Discovery.Metric)
+		}
+		if err := validateUniqueNames(p.Discovery.GroupBy, "discovery.groupBy", labelNameRE, "profile "+p.ID); err != nil {
+			return err
+		}
+		if err := validateUniqueNames(p.Discovery.Labels, "discovery.labels", labelNameRE, "profile "+p.ID); err != nil {
+			return err
+		}
+		required := map[string]bool{}
+		for _, panel := range p.Panels {
+			for _, metric := range panel.RequiredMetrics {
+				required[metric] = true
+			}
+		}
+		if !required[p.Discovery.Metric] {
+			return fmt.Errorf("profile %s: discovery.metric %q 必须出现在某个面板的 requiredMetrics 中", p.ID, p.Discovery.Metric)
 		}
 	}
 	return nil

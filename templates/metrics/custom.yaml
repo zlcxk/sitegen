@@ -5,6 +5,9 @@ profiles:
     target: component
     scope: component
     componentTypes: [custom]
+    discovery:
+      metric: up
+      groupBy: [job, instance]
     panels:
       - id: custom-up
         name: 抓取状态

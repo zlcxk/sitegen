@@ -5,6 +5,9 @@ profiles:
     target: application
     scope: job
     auto: true
+    discovery:
+      metric: up
+      groupBy: [job]
     panels:
       - id: app-up
         name: 应用指标采集状态

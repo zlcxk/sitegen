@@ -154,23 +154,41 @@ func RenderCheckQuery(query string, site *config.Site, selector string) string {
 	if site != nil && len(site.Spec.Applications) > 0 {
 		firstApp = site.Spec.Applications[0].ID
 	}
-	out = grafanaJSONVarRE.ReplaceAllStringFunc(out, func(token string) string {
-		if strings.Contains(token, "pod") {
+	// Quoted tokens are the modern, context-correct form. Replace the whole
+	// quoted literal so regex and string contexts both stay valid PromQL.
+	out = quotedGrafanaVarRE.ReplaceAllStringFunc(out, func(match string) string {
+		token := match[1 : len(match)-1]
+		if isPodVariable(token) {
+			return QuoteLabelValue(".+")
+		}
+		return QuoteLabelValue(firstApp)
+	})
+	out = quotedGrafanaBareVarRE.ReplaceAllStringFunc(out, func(match string) string {
+		token := match[1 : len(match)-1]
+		if isPodVariable(token) {
+			return QuoteLabelValue(".+")
+		}
+		return QuoteLabelValue(firstApp)
+	})
+	// Legacy unquoted tokens. Quote the replacement because the token is
+	// normally used as a matcher value or string argument.
+	out = grafanaVarTokenRE.ReplaceAllStringFunc(out, func(token string) string {
+		if isPodVariable(token) {
 			return QuoteLabelValue(".+")
 		}
 		return QuoteLabelValue(firstApp)
 	})
 	out = grafanaVarRE.ReplaceAllStringFunc(out, func(token string) string {
-		if strings.Contains(token, "pod") {
-			return ".+"
+		if isPodVariable(token) {
+			return QuoteLabelValue(".+")
 		}
-		return firstApp
+		return QuoteLabelValue(firstApp)
 	})
 	out = grafanaBareVarRE.ReplaceAllStringFunc(out, func(token string) string {
-		if strings.Contains(token, "pod") {
-			return ".+"
+		if isPodVariable(token) {
+			return QuoteLabelValue(".+")
 		}
-		return firstApp
+		return QuoteLabelValue(firstApp)
 	})
 	return out
 }

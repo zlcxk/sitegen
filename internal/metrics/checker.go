@@ -850,9 +850,7 @@ func (c *Checker) variableTasks() []checkTask {
 		if firstApp == "" {
 			continue
 		}
-		expr := grafanaJSONVarRE.ReplaceAllStringFunc(expression, func(string) string {
-			return QuoteLabelValue(firstApp)
-		})
+		expr := RenderCheckQuery(expression, c.Site, "")
 		name := ProfilePodVar(profileID)
 		tasks = append(tasks, checkTask{
 			category: "Dashboard 变量",

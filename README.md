@@ -26,7 +26,11 @@ make build
 # 初始化目录和工具配置
 ./sitegen init
 
-# 交互式创建站点
+# 只读发现真实 Prometheus 中的指标、应用、域名、Pod 和组件候选
+./sitegen discover --prometheus-url http://prometheus.example:9090
+./sitegen discover --site sites/admin.yaml
+
+# 交互式创建站点（支持自动发现、手动配置、离线创建）
 ./sitegen create
 
 # 只校验 YAML
@@ -65,9 +69,9 @@ reports/<site-id>-validation.txt
 site-observability/
 ├── cmd/sitegen/main.go
 ├── internal/
-│   ├── cli/            # Cobra 命令、交互式向导、终端输入
+│   ├── cli/            # Cobra 命令、交互式向导、自动发现创建
 │   ├── config/         # YAML 模型、严格解码、关联校验、原子写入
-│   ├── discovery/      # Prometheus API、认证、TLS、超时
+│   ├── discovery/      # Prometheus API、只读发现、候选/标签/Pod 验证
 │   ├── metrics/        # 模板注册表、Selector、PromQL AST 改写、Prometheus 校验
 │   ├── dashboard/      # 强类型 Grafana JSON 构建、变量、布局、链接
 │   └── output/         # 原子文件写入、校验报告
@@ -76,6 +80,8 @@ site-observability/
 │   ├── dashboard/      # 统一 Dashboard 基础模板
 │   └── metrics/        # 指标模板（HTTP/JVM/K8s/中间件/Blackbox）
 ├── schemas/site.schema.json
+├── AGENTS.md            # 真实数据驱动的 Coding Agent 规则
+├── sites/admin.yaml
 ├── sites/examples/order-admin-test.yaml
 ├── dashboards/
 ├── reports/
@@ -191,10 +197,11 @@ JSON Schema 位于 [schemas/site.schema.json](schemas/site.schema.json)，可用
 | 命令 | 说明 |
 | --- | --- |
 | `sitegen init` | 初始化目录和工具配置 |
-| `sitegen create` | 交互式创建站点 YAML；支持回退、重新编辑、跳过、草稿恢复 |
+| `sitegen create` | 自动发现 / 手动 / 离线创建站点 YAML；支持回退、重新编辑、跳过、草稿恢复 |
 | `sitegen edit --site ...` | 按配置分区编辑已有站点，只修改选中的分区 |
+| `sitegen discover` | 只读发现真实指标、应用、域名、Pod 与组件候选；不写 YAML、不生成 Dashboard |
 | `sitegen validate --site ...` | 校验 YAML、ID、依赖、模板引用、UTF-8 |
-| `sitegen check --site ...` | 连接 Prometheus 校验指标、标签、Selector、Pod 归属、PromQL |
+| `sitegen check --site ...` | 连接 Prometheus 校验指标、标签、Selector、Pod 归属、PromQL 与 Dashboard 变量模型 |
 | `sitegen generate --site ...` | 只生成 Dashboard（不访问 Prometheus） |
 | `sitegen build --site ...` | 静态校验 + Dashboard 生成；实时检查交给 `check` |
 | `sitegen build --site ... --strict-check` | 严格模式：实时检查失败时阻止构建 |
@@ -244,7 +251,39 @@ Dashboard 已生成。
 
 `--skip-prometheus` 保留为兼容参数；普通 `build` 默认已经不执行实时数据检查。
 
+`discover` 额外支持：
+
+```text
+--site sites/admin.yaml    # 只发现该站点相关的应用、域名和组件
+--profile http             # 只发现指定 Profile
+--prometheus-url URL
+--timeout 15s
+--lookback 1h
+```
+
+`discover` 只读：不修改 Prometheus、Kubernetes、Grafana，不写站点 YAML，也不生成 Dashboard。输出中的指标存在性、标签值、Pod 数量和容器标签全部来自实际查询。
+
 ### 交互式创建流程
+
+连接 Prometheus 时，`sitegen create` 先询问创建模式：
+
+```text
+1. 自动发现并创建（推荐）
+2. 手动配置（连接 Prometheus 辅助校验）
+3. 离线创建（不连接 Prometheus）
+```
+
+自动模式使用真实数据：
+
+- 从 `probe_success` / `probe_duration_seconds` 发现 Blackbox 域名；
+- 从 HTTP / JVM 指标发现 `application + namespace + job`，同名应用不同 Namespace 分开显示；
+- 同一应用存在多个 Job 时必须由用户选择；
+- 只启用数据完整的 Profile；HTTP Count/Sum/Bucket 或必需标签缺失时不假装可用；
+- 组件从 `mysql_up` / `redis_up` / `kafka_brokers` 发现；缺少 Instance 的组件跳过并提示手动补充；
+- Kubernetes Pod 归属优先使用已验证的 `kube_pod_labels` 标签；指标不存在或没有匹配时使用经过试查询验证的 Pod 正则；
+- Container Matcher 只有在真实容器标签证明能排除父级 cgroup / Pause 且保留业务容器时才推荐。
+
+手动/离线模式不依赖 Prometheus；Prometheus 不可用时仍可完整创建站点。
 
 每个配置阶段都显示导航菜单：
 
@@ -452,7 +491,24 @@ Pod 归属失败后，下游 Kubernetes 覆盖检查和容器过滤检查记为 
 
 不生成 `$component`、`$instance` 等无实际查询作用的变量。Dashboard 校验会拒绝未被任何面板或变量查询引用的变量。
 
-应用级查询在生成时把每个应用对象的完整精确 Selector 编译进 PromQL，并通过派生标签 `sitegen_app` 过滤对应的 Profile 选择变量。变量值使用 Grafana 的 JSON 转义格式插值，URL 手工覆盖既不能注入 PromQL，也无法匹配站点之外的应用，只会得到空结果。默认时间范围 1 小时，刷新 30 秒。
+应用级查询在生成时把每个应用对象的完整精确 Selector 编译进 PromQL，并通过派生标签 `sitegen_app` 过滤对应的 Profile 选择变量。
+
+变量格式遵循 Grafana 11.x 的真实语义：
+
+| 场景 | 格式 |
+| --- | --- |
+| Prometheus 正则 Matcher | `pod=~"${k8s_pod:regex}"` |
+| PromQL 字符串参数 | `label_replace(..., "${jvm_app_selector}", ...)` |
+| JSON 数据 | 仅在确实需要 JSON 时使用 `:json` |
+
+- 应用选择器是单选 `custom` 变量，`valuesFormat: csv`，值为应用配置 ID。
+- Pod 变量使用 `query_result(...)`，`regexApplyTo: value`，`AllValue: .*`。
+- **不再在 PromQL 中使用 `${var:json}`**：JSON 数组不是 PromQL 字符串字面量。
+- 静态 Pod 归属（`kubernetes.podSelector`）和动态 Pod 选择（Pod 变量）分别生成；Pod 正则变量必须放在双引号内并使用 `:regex`。
+- `pod-regex` 模式下生成的 `pod=~"^app-.*$", pod=~"${k8s_pod:regex}"` 是**交集过滤**：前者限定应用 Pod，后者是用户在 Grafana 中的 Pod 选择；两者来源不同、各追加一次，不是重复 Matcher。`labels` 模式不使用静态 Pod 正则，而是通过 `kube_pod_labels` 关联应用 Pod。
+- 生成器在 `check`/`build` 中校验变量模型、查询类型和 Matcher 格式；没有在目标 Grafana 实际导入并切换变量时，报告会明确输出 `[WARN] Dashboard 变量 / Grafana 实际插值`，不会把静态校验当作 Grafana 验收通过。
+
+默认时间范围 1 小时，刷新 30 秒。
 
 ### 稳定性和安全
 
@@ -513,13 +569,17 @@ make generate-example
 - 向导回退/重新编辑/跳过/退出草稿、草稿恢复、分区编辑只修改选中分区、输入重试、终端 `:b/:e/:s/:q` 命令；
 - Selector 完整输出、真实标签值诊断、非 UTF-8 字段定位、PromQL 特殊字符转义；
 - Pod 归属成功/失败、下游 SKIP 传播、Pod 正则、应用范围内容器过滤、kube-state-metrics 指标不被容器 Matcher 误过滤；
-- 报告根因摘要与下游依赖计数。
+- 报告根因摘要与下游依赖计数；
+- Grafana 变量模型与格式：`query_result` Pod 变量、`regexApplyTo=value`、`AllValue=.*`、应用选择器单选 `custom`、禁止 `:json`、正则变量必须加引号；
+- 模板校验拒绝 `:json` 和未加引号的正则变量；
+- `discover` 的应用/域名/组件/Pod/容器候选发现、站点过滤、真实标签值与 Pod 正则验证；
+- 创建向导自动发现模式：域名、应用、Profile、组件、Pod 归属和 Container Matcher 均来自真实数据。
 
 ---
 
 ## 10. 版本与限制
 
-当前为 V1.0.3：
+当前为 V1.0.4：
 
 - 不提供 Web 后台、数据库、告警规则生成或自动发布；
 - 不修改 Prometheus Operator / ServiceMonitor / ScrapeConfig；
@@ -534,6 +594,15 @@ make generate-example
 - Kubernetes 应用级面板要求显式 `kubernetes.podSelector`；无法建立 Pod 归属时跳过面板并输出 WARN，绝不退化为 Namespace 全量查询；
 - 不同环境 cAdvisor/Java 标签结构差异较大，`containerMatchers` 必须根据目标 Prometheus 真实标签确认；
 - Grafana 11.4 / 真实 Prometheus 的导入与查询验证必须在目标环境执行；没有真实 URL 时不能把 `generate` 或 `--skip-prometheus` 视为环境验收通过。
+
+### V1.0.4 迁移提示
+
+- 重新执行 `sitegen build` 生成 Dashboard；旧 Dashboard 中的 `${var:json}` 变量表达式必须替换。
+- Pod 正则变量从 `pod=~${k8s_pod:json}` 变为 `pod=~"${k8s_pod:regex}"`；应用选择器从 `${var:json}` 变为 `"${var}"`。
+- `sitegen check` 新增 Dashboard 变量模型、Pod Matcher 和 Grafana 实际插值检查；最后一项目前固定为 WARN，直到在目标 Grafana 完成导入和变量切换验证。
+- 新增 `sitegen discover` 只读发现命令；创建向导新增自动发现模式。
+- 开发阶段使用 `byok-observability-mcp` 获取真实指标和标签，规则见 [AGENTS.md](AGENTS.md)。MCP 不是 `sitegen` 运行时依赖。
+- 目标 API Token 没有 Dashboard 写权限时无法自动导入 Grafana；此时必须人工导入并在目标 Grafana 中完成变量验收。
 
 ### V1.0.3 迁移提示
 

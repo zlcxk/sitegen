@@ -688,7 +688,7 @@
                 "uid": "${datasource}"
               },
               "editorMode": "code",
-              "expr": "sum(\n  (\n    (\n        (\n          label_replace(\n            rate(\n              http_server_requests_seconds_count{application=\"rtd-admin\",job=\"rtd-admin\",namespace=\"dev\"}[5m]\n            ),\n            \"sitegen_app\",\n            \"rtd-admin-dev\",\n            \"\",\n            \"\"\n          )\n        )\n      * on (sitegen_app) group_left ()\n        label_replace(vector(1), \"sitegen_app\", ${http_app_selector:json}, \"\", \"\")\n    )\n  )\n)",
+              "expr": "sum(\n  (\n    (\n        (\n          label_replace(\n            rate(\n              http_server_requests_seconds_count{application=\"rtd-admin\",job=\"rtd-admin\",namespace=\"dev\"}[5m]\n            ),\n            \"sitegen_app\",\n            \"rtd-admin-dev\",\n            \"\",\n            \"\"\n          )\n        )\n      * on (sitegen_app) group_left ()\n        label_replace(vector(1), \"sitegen_app\", \"${http_app_selector}\", \"\", \"\")\n    )\n  )\n)",
               "legendFormat": "RPS",
               "range": true,
               "refId": "A"
@@ -786,7 +786,7 @@
                 "uid": "${datasource}"
               },
               "editorMode": "code",
-              "expr": "  sum(\n    (\n      (\n          (\n            label_replace(\n              rate(\n                http_server_requests_seconds_count{application=\"rtd-admin\",job=\"rtd-admin\",namespace=\"dev\",status=~\"2..\"}[5m]\n              ),\n              \"sitegen_app\",\n              \"rtd-admin-dev\",\n              \"\",\n              \"\"\n            )\n          )\n        * on (sitegen_app) group_left ()\n          label_replace(vector(1), \"sitegen_app\", ${http_app_selector:json}, \"\", \"\")\n      )\n    )\n  )\n/\n  clamp_min(\n    sum(\n      (\n        (\n            (\n              label_replace(\n                rate(\n                  http_server_requests_seconds_count{application=\"rtd-admin\",job=\"rtd-admin\",namespace=\"dev\"}[5m]\n                ),\n                \"sitegen_app\",\n                \"rtd-admin-dev\",\n                \"\",\n                \"\"\n              )\n            )\n          * on (sitegen_app) group_left ()\n            label_replace(vector(1), \"sitegen_app\", ${http_app_selector:json}, \"\", \"\")\n        )\n      )\n    ),\n    0.000000001\n  )",
+              "expr": "  sum(\n    (\n      (\n          (\n            label_replace(\n              rate(\n                http_server_requests_seconds_count{application=\"rtd-admin\",job=\"rtd-admin\",namespace=\"dev\",status=~\"2..\"}[5m]\n              ),\n              \"sitegen_app\",\n              \"rtd-admin-dev\",\n              \"\",\n              \"\"\n            )\n          )\n        * on (sitegen_app) group_left ()\n          label_replace(vector(1), \"sitegen_app\", \"${http_app_selector}\", \"\", \"\")\n      )\n    )\n  )\n/\n  clamp_min(\n    sum(\n      (\n        (\n            (\n              label_replace(\n                rate(\n                  http_server_requests_seconds_count{application=\"rtd-admin\",job=\"rtd-admin\",namespace=\"dev\"}[5m]\n                ),\n                \"sitegen_app\",\n                \"rtd-admin-dev\",\n                \"\",\n                \"\"\n              )\n            )\n          * on (sitegen_app) group_left ()\n            label_replace(vector(1), \"sitegen_app\", \"${http_app_selector}\", \"\", \"\")\n        )\n      )\n    ),\n    0.000000001\n  )",
               "legendFormat": "2xx",
               "range": true,
               "refId": "A"
@@ -867,7 +867,7 @@
                 "uid": "${datasource}"
               },
               "editorMode": "code",
-              "expr": "  sum(\n    (\n      (\n          (\n            label_replace(\n              rate(\n                http_server_requests_seconds_count{application=\"rtd-admin\",job=\"rtd-admin\",namespace=\"dev\",status=~\"3..\"}[5m]\n              ),\n              \"sitegen_app\",\n              \"rtd-admin-dev\",\n              \"\",\n              \"\"\n            )\n          )\n        * on (sitegen_app) group_left ()\n          label_replace(vector(1), \"sitegen_app\", ${http_app_selector:json}, \"\", \"\")\n      )\n    )\n  )\n/\n  clamp_min(\n    sum(\n      (\n        (\n            (\n              label_replace(\n                rate(\n                  http_server_requests_seconds_count{application=\"rtd-admin\",job=\"rtd-admin\",namespace=\"dev\"}[5m]\n                ),\n                \"sitegen_app\",\n                \"rtd-admin-dev\",\n                \"\",\n                \"\"\n              )\n            )\n          * on (sitegen_app) group_left ()\n            label_replace(vector(1), \"sitegen_app\", ${http_app_selector:json}, \"\", \"\")\n        )\n      )\n    ),\n    0.000000001\n  )",
+              "expr": "  sum(\n    (\n      (\n          (\n            label_replace(\n              rate(\n                http_server_requests_seconds_count{application=\"rtd-admin\",job=\"rtd-admin\",namespace=\"dev\",status=~\"3..\"}[5m]\n              ),\n              \"sitegen_app\",\n              \"rtd-admin-dev\",\n              \"\",\n              \"\"\n            )\n          )\n        * on (sitegen_app) group_left ()\n          label_replace(vector(1), \"sitegen_app\", \"${http_app_selector}\", \"\", \"\")\n      )\n    )\n  )\n/\n  clamp_min(\n    sum(\n      (\n        (\n            (\n              label_replace(\n                rate(\n                  http_server_requests_seconds_count{application=\"rtd-admin\",job=\"rtd-admin\",namespace=\"dev\"}[5m]\n                ),\n                \"sitegen_app\",\n                \"rtd-admin-dev\",\n                \"\",\n                \"\"\n              )\n            )\n          * on (sitegen_app) group_left ()\n            label_replace(vector(1), \"sitegen_app\", \"${http_app_selector}\", \"\", \"\")\n        )\n      )\n    ),\n    0.000000001\n  )",
               "legendFormat": "3xx",
               "range": true,
               "refId": "A"
@@ -948,7 +948,7 @@
                 "uid": "${datasource}"
               },
               "editorMode": "code",
-              "expr": "  sum(\n    (\n      (\n          (\n            label_replace(\n              rate(\n                http_server_requests_seconds_count{application=\"rtd-admin\",job=\"rtd-admin\",namespace=\"dev\",status=~\"4..\"}[5m]\n              ),\n              \"sitegen_app\",\n              \"rtd-admin-dev\",\n              \"\",\n              \"\"\n            )\n          )\n        * on (sitegen_app) group_left ()\n          label_replace(vector(1), \"sitegen_app\", ${http_app_selector:json}, \"\", \"\")\n      )\n    )\n  )\n/\n  clamp_min(\n    sum(\n      (\n        (\n            (\n              label_replace(\n                rate(\n                  http_server_requests_seconds_count{application=\"rtd-admin\",job=\"rtd-admin\",namespace=\"dev\"}[5m]\n                ),\n                \"sitegen_app\",\n                \"rtd-admin-dev\",\n                \"\",\n                \"\"\n              )\n            )\n          * on (sitegen_app) group_left ()\n            label_replace(vector(1), \"sitegen_app\", ${http_app_selector:json}, \"\", \"\")\n        )\n      )\n    ),\n    0.000000001\n  )",
+              "expr": "  sum(\n    (\n      (\n          (\n            label_replace(\n              rate(\n                http_server_requests_seconds_count{application=\"rtd-admin\",job=\"rtd-admin\",namespace=\"dev\",status=~\"4..\"}[5m]\n              ),\n              \"sitegen_app\",\n              \"rtd-admin-dev\",\n              \"\",\n              \"\"\n            )\n          )\n        * on (sitegen_app) group_left ()\n          label_replace(vector(1), \"sitegen_app\", \"${http_app_selector}\", \"\", \"\")\n      )\n    )\n  )\n/\n  clamp_min(\n    sum(\n      (\n        (\n            (\n              label_replace(\n                rate(\n                  http_server_requests_seconds_count{application=\"rtd-admin\",job=\"rtd-admin\",namespace=\"dev\"}[5m]\n                ),\n                \"sitegen_app\",\n                \"rtd-admin-dev\",\n                \"\",\n                \"\"\n              )\n            )\n          * on (sitegen_app) group_left ()\n            label_replace(vector(1), \"sitegen_app\", \"${http_app_selector}\", \"\", \"\")\n        )\n      )\n    ),\n    0.000000001\n  )",
               "legendFormat": "4xx",
               "range": true,
               "refId": "A"
@@ -1046,7 +1046,7 @@
                 "uid": "${datasource}"
               },
               "editorMode": "code",
-              "expr": "  sum(\n    (\n      (\n          (\n            label_replace(\n              rate(\n                http_server_requests_seconds_count{application=\"rtd-admin\",job=\"rtd-admin\",namespace=\"dev\",status=~\"5..\"}[5m]\n              ),\n              \"sitegen_app\",\n              \"rtd-admin-dev\",\n              \"\",\n              \"\"\n            )\n          )\n        * on (sitegen_app) group_left ()\n          label_replace(vector(1), \"sitegen_app\", ${http_app_selector:json}, \"\", \"\")\n      )\n    )\n  )\n/\n  clamp_min(\n    sum(\n      (\n        (\n            (\n              label_replace(\n                rate(\n                  http_server_requests_seconds_count{application=\"rtd-admin\",job=\"rtd-admin\",namespace=\"dev\"}[5m]\n                ),\n                \"sitegen_app\",\n                \"rtd-admin-dev\",\n                \"\",\n                \"\"\n              )\n            )\n          * on (sitegen_app) group_left ()\n            label_replace(vector(1), \"sitegen_app\", ${http_app_selector:json}, \"\", \"\")\n        )\n      )\n    ),\n    0.000000001\n  )",
+              "expr": "  sum(\n    (\n      (\n          (\n            label_replace(\n              rate(\n                http_server_requests_seconds_count{application=\"rtd-admin\",job=\"rtd-admin\",namespace=\"dev\",status=~\"5..\"}[5m]\n              ),\n              \"sitegen_app\",\n              \"rtd-admin-dev\",\n              \"\",\n              \"\"\n            )\n          )\n        * on (sitegen_app) group_left ()\n          label_replace(vector(1), \"sitegen_app\", \"${http_app_selector}\", \"\", \"\")\n      )\n    )\n  )\n/\n  clamp_min(\n    sum(\n      (\n        (\n            (\n              label_replace(\n                rate(\n                  http_server_requests_seconds_count{application=\"rtd-admin\",job=\"rtd-admin\",namespace=\"dev\"}[5m]\n                ),\n                \"sitegen_app\",\n                \"rtd-admin-dev\",\n                \"\",\n                \"\"\n              )\n            )\n          * on (sitegen_app) group_left ()\n            label_replace(vector(1), \"sitegen_app\", \"${http_app_selector}\", \"\", \"\")\n        )\n      )\n    ),\n    0.000000001\n  )",
               "legendFormat": "5xx",
               "range": true,
               "refId": "A"
@@ -1127,7 +1127,7 @@
                 "uid": "${datasource}"
               },
               "editorMode": "code",
-              "expr": "    1000\n  *\n    sum(\n      (\n        (\n            (\n              label_replace(\n                rate(http_server_requests_seconds_sum{application=\"rtd-admin\",job=\"rtd-admin\",namespace=\"dev\"}[5m]),\n                \"sitegen_app\",\n                \"rtd-admin-dev\",\n                \"\",\n                \"\"\n              )\n            )\n          * on (sitegen_app) group_left ()\n            label_replace(vector(1), \"sitegen_app\", ${http_app_selector:json}, \"\", \"\")\n        )\n      )\n    )\n/\n  clamp_min(\n    sum(\n      (\n        (\n            (\n              label_replace(\n                rate(\n                  http_server_requests_seconds_count{application=\"rtd-admin\",job=\"rtd-admin\",namespace=\"dev\"}[5m]\n                ),\n                \"sitegen_app\",\n                \"rtd-admin-dev\",\n                \"\",\n                \"\"\n              )\n            )\n          * on (sitegen_app) group_left ()\n            label_replace(vector(1), \"sitegen_app\", ${http_app_selector:json}, \"\", \"\")\n        )\n      )\n    ),\n    0.000000001\n  )",
+              "expr": "    1000\n  *\n    sum(\n      (\n        (\n            (\n              label_replace(\n                rate(http_server_requests_seconds_sum{application=\"rtd-admin\",job=\"rtd-admin\",namespace=\"dev\"}[5m]),\n                \"sitegen_app\",\n                \"rtd-admin-dev\",\n                \"\",\n                \"\"\n              )\n            )\n          * on (sitegen_app) group_left ()\n            label_replace(vector(1), \"sitegen_app\", \"${http_app_selector}\", \"\", \"\")\n        )\n      )\n    )\n/\n  clamp_min(\n    sum(\n      (\n        (\n            (\n              label_replace(\n                rate(\n                  http_server_requests_seconds_count{application=\"rtd-admin\",job=\"rtd-admin\",namespace=\"dev\"}[5m]\n                ),\n                \"sitegen_app\",\n                \"rtd-admin-dev\",\n                \"\",\n                \"\"\n              )\n            )\n          * on (sitegen_app) group_left ()\n            label_replace(vector(1), \"sitegen_app\", \"${http_app_selector}\", \"\", \"\")\n        )\n      )\n    ),\n    0.000000001\n  )",
               "legendFormat": "平均",
               "range": true,
               "refId": "A"
@@ -1208,7 +1208,7 @@
                 "uid": "${datasource}"
               },
               "editorMode": "code",
-              "expr": "  1000\n*\n  histogram_quantile(\n    0.95,\n    sum by (le) (\n      (\n        (\n            (\n              label_replace(\n                rate(\n                  http_server_requests_seconds_bucket{application=\"rtd-admin\",job=\"rtd-admin\",namespace=\"dev\"}[5m]\n                ),\n                \"sitegen_app\",\n                \"rtd-admin-dev\",\n                \"\",\n                \"\"\n              )\n            )\n          * on (sitegen_app) group_left ()\n            label_replace(vector(1), \"sitegen_app\", ${http_app_selector:json}, \"\", \"\")\n        )\n      )\n    )\n  )",
+              "expr": "  1000\n*\n  histogram_quantile(\n    0.95,\n    sum by (le) (\n      (\n        (\n            (\n              label_replace(\n                rate(\n                  http_server_requests_seconds_bucket{application=\"rtd-admin\",job=\"rtd-admin\",namespace=\"dev\"}[5m]\n                ),\n                \"sitegen_app\",\n                \"rtd-admin-dev\",\n                \"\",\n                \"\"\n              )\n            )\n          * on (sitegen_app) group_left ()\n            label_replace(vector(1), \"sitegen_app\", \"${http_app_selector}\", \"\", \"\")\n        )\n      )\n    )\n  )",
               "legendFormat": "P95",
               "range": true,
               "refId": "A"
@@ -1289,7 +1289,7 @@
                 "uid": "${datasource}"
               },
               "editorMode": "code",
-              "expr": "  1000\n*\n  histogram_quantile(\n    0.99,\n    sum by (le) (\n      (\n        (\n            (\n              label_replace(\n                rate(\n                  http_server_requests_seconds_bucket{application=\"rtd-admin\",job=\"rtd-admin\",namespace=\"dev\"}[5m]\n                ),\n                \"sitegen_app\",\n                \"rtd-admin-dev\",\n                \"\",\n                \"\"\n              )\n            )\n          * on (sitegen_app) group_left ()\n            label_replace(vector(1), \"sitegen_app\", ${http_app_selector:json}, \"\", \"\")\n        )\n      )\n    )\n  )",
+              "expr": "  1000\n*\n  histogram_quantile(\n    0.99,\n    sum by (le) (\n      (\n        (\n            (\n              label_replace(\n                rate(\n                  http_server_requests_seconds_bucket{application=\"rtd-admin\",job=\"rtd-admin\",namespace=\"dev\"}[5m]\n                ),\n                \"sitegen_app\",\n                \"rtd-admin-dev\",\n                \"\",\n                \"\"\n              )\n            )\n          * on (sitegen_app) group_left ()\n            label_replace(vector(1), \"sitegen_app\", \"${http_app_selector}\", \"\", \"\")\n        )\n      )\n    )\n  )",
               "legendFormat": "P99",
               "range": true,
               "refId": "A"
@@ -1370,7 +1370,7 @@
                 "uid": "${datasource}"
               },
               "editorMode": "code",
-              "expr": "sum by (status) (\n  (\n    (\n        (\n          label_replace(\n            rate(\n              http_server_requests_seconds_count{application=\"rtd-admin\",job=\"rtd-admin\",namespace=\"dev\"}[5m]\n            ),\n            \"sitegen_app\",\n            \"rtd-admin-dev\",\n            \"\",\n            \"\"\n          )\n        )\n      * on (sitegen_app) group_left ()\n        label_replace(vector(1), \"sitegen_app\", ${http_app_selector:json}, \"\", \"\")\n    )\n  )\n)",
+              "expr": "sum by (status) (\n  (\n    (\n        (\n          label_replace(\n            rate(\n              http_server_requests_seconds_count{application=\"rtd-admin\",job=\"rtd-admin\",namespace=\"dev\"}[5m]\n            ),\n            \"sitegen_app\",\n            \"rtd-admin-dev\",\n            \"\",\n            \"\"\n          )\n        )\n      * on (sitegen_app) group_left ()\n        label_replace(vector(1), \"sitegen_app\", \"${http_app_selector}\", \"\", \"\")\n    )\n  )\n)",
               "legendFormat": "{{status}}",
               "range": true,
               "refId": "A"
@@ -1425,7 +1425,7 @@
                 "uid": "${datasource}"
               },
               "editorMode": "code",
-              "expr": "topk(\n  10,\n      1000\n    *\n      histogram_quantile(\n        0.95,\n        sum by (le, application, namespace, method, uri) (\n          (\n            (\n                (\n                  label_replace(\n                    rate(\n                      http_server_requests_seconds_bucket{application=\"rtd-admin\",job=\"rtd-admin\",method!=\"OPTIONS\",namespace=\"dev\"}[5m]\n                    ),\n                    \"sitegen_app\",\n                    \"rtd-admin-dev\",\n                    \"\",\n                    \"\"\n                  )\n                )\n              * on (sitegen_app) group_left ()\n                label_replace(vector(1), \"sitegen_app\", ${http_app_selector:json}, \"\", \"\")\n            )\n          )\n        )\n      )\n  and on (application, namespace, method, uri)\n      sum by (application, namespace, method, uri) (\n        (\n          (\n              (\n                label_replace(\n                  rate(\n                    http_server_requests_seconds_count{application=\"rtd-admin\",job=\"rtd-admin\",method!=\"OPTIONS\",namespace=\"dev\"}[5m]\n                  ),\n                  \"sitegen_app\",\n                  \"rtd-admin-dev\",\n                  \"\",\n                  \"\"\n                )\n              )\n            * on (sitegen_app) group_left ()\n              label_replace(vector(1), \"sitegen_app\", ${http_app_selector:json}, \"\", \"\")\n          )\n        )\n      )\n    >\n      0.0166666667\n)",
+              "expr": "topk(\n  10,\n      1000\n    *\n      histogram_quantile(\n        0.95,\n        sum by (le, application, namespace, method, uri) (\n          (\n            (\n                (\n                  label_replace(\n                    rate(\n                      http_server_requests_seconds_bucket{application=\"rtd-admin\",job=\"rtd-admin\",method!=\"OPTIONS\",namespace=\"dev\"}[5m]\n                    ),\n                    \"sitegen_app\",\n                    \"rtd-admin-dev\",\n                    \"\",\n                    \"\"\n                  )\n                )\n              * on (sitegen_app) group_left ()\n                label_replace(vector(1), \"sitegen_app\", \"${http_app_selector}\", \"\", \"\")\n            )\n          )\n        )\n      )\n  and on (application, namespace, method, uri)\n      sum by (application, namespace, method, uri) (\n        (\n          (\n              (\n                label_replace(\n                  rate(\n                    http_server_requests_seconds_count{application=\"rtd-admin\",job=\"rtd-admin\",method!=\"OPTIONS\",namespace=\"dev\"}[5m]\n                  ),\n                  \"sitegen_app\",\n                  \"rtd-admin-dev\",\n                  \"\",\n                  \"\"\n                )\n              )\n            * on (sitegen_app) group_left ()\n              label_replace(vector(1), \"sitegen_app\", \"${http_app_selector}\", \"\", \"\")\n          )\n        )\n      )\n    >\n      0.0166666667\n)",
               "format": "table",
               "instant": true,
               "range": false,
@@ -1481,7 +1481,7 @@
                 "uid": "${datasource}"
               },
               "editorMode": "code",
-              "expr": "topk(\n  10,\n  sum by (application, namespace, method, uri) (\n    (\n      (\n          (\n            label_replace(\n              rate(\n                http_server_requests_seconds_count{application=\"rtd-admin\",job=\"rtd-admin\",method!=\"OPTIONS\",namespace=\"dev\"}[5m]\n              ),\n              \"sitegen_app\",\n              \"rtd-admin-dev\",\n              \"\",\n              \"\"\n            )\n          )\n        * on (sitegen_app) group_left ()\n          label_replace(vector(1), \"sitegen_app\", ${http_app_selector:json}, \"\", \"\")\n      )\n    )\n  )\n)",
+              "expr": "topk(\n  10,\n  sum by (application, namespace, method, uri) (\n    (\n      (\n          (\n            label_replace(\n              rate(\n                http_server_requests_seconds_count{application=\"rtd-admin\",job=\"rtd-admin\",method!=\"OPTIONS\",namespace=\"dev\"}[5m]\n              ),\n              \"sitegen_app\",\n              \"rtd-admin-dev\",\n              \"\",\n              \"\"\n            )\n          )\n        * on (sitegen_app) group_left ()\n          label_replace(vector(1), \"sitegen_app\", \"${http_app_selector}\", \"\", \"\")\n      )\n    )\n  )\n)",
               "format": "table",
               "instant": true,
               "range": false,
@@ -1563,7 +1563,7 @@
                 "uid": "${datasource}"
               },
               "editorMode": "code",
-              "expr": "sum by (application, namespace, method) (\n  (\n    (\n        (\n          label_replace(\n            rate(\n              http_server_requests_seconds_count{application=\"rtd-admin\",job=\"rtd-admin\",namespace=\"dev\"}[5m]\n            ),\n            \"sitegen_app\",\n            \"rtd-admin-dev\",\n            \"\",\n            \"\"\n          )\n        )\n      * on (sitegen_app) group_left ()\n        label_replace(vector(1), \"sitegen_app\", ${http_app_selector:json}, \"\", \"\")\n    )\n  )\n)",
+              "expr": "sum by (application, namespace, method) (\n  (\n    (\n        (\n          label_replace(\n            rate(\n              http_server_requests_seconds_count{application=\"rtd-admin\",job=\"rtd-admin\",namespace=\"dev\"}[5m]\n            ),\n            \"sitegen_app\",\n            \"rtd-admin-dev\",\n            \"\",\n            \"\"\n          )\n        )\n      * on (sitegen_app) group_left ()\n        label_replace(vector(1), \"sitegen_app\", \"${http_app_selector}\", \"\", \"\")\n    )\n  )\n)",
               "legendFormat": "{{application}} / {{method}}",
               "range": true,
               "refId": "A"
@@ -1658,7 +1658,7 @@
                 "uid": "${datasource}"
               },
               "editorMode": "code",
-              "expr": "sum by (pod) (\n  (\n    (\n        (\n          (\n              label_replace(\n                jvm_memory_used_bytes{application=\"rtd-admin\",area=\"heap\",job=\"rtd-admin\",namespace=\"dev\",pod=~${jvm_pod:json}},\n                \"sitegen_app\",\n                \"rtd-admin-dev\",\n                \"\",\n                \"\"\n              )\n            or\n              label_replace(\n                jvm_memory_used_bytes{application=\"user-center-application\",area=\"heap\",job=\"user-center-application\",namespace=\"dev\",pod=~${jvm_pod:json}},\n                \"sitegen_app\",\n                \"user-center-application-dev\",\n                \"\",\n                \"\"\n              )\n          )\n        )\n      * on (sitegen_app) group_left ()\n        label_replace(vector(1), \"sitegen_app\", ${jvm_app_selector:json}, \"\", \"\")\n    )\n  )\n)",
+              "expr": "sum by (pod) (\n  (\n    (\n        (\n          (\n              label_replace(\n                jvm_memory_used_bytes{application=\"rtd-admin\",area=\"heap\",job=\"rtd-admin\",namespace=\"dev\",pod=~\"${jvm_pod:regex}\"},\n                \"sitegen_app\",\n                \"rtd-admin-dev\",\n                \"\",\n                \"\"\n              )\n            or\n              label_replace(\n                jvm_memory_used_bytes{application=\"user-center-application\",area=\"heap\",job=\"user-center-application\",namespace=\"dev\",pod=~\"${jvm_pod:regex}\"},\n                \"sitegen_app\",\n                \"user-center-application-dev\",\n                \"\",\n                \"\"\n              )\n          )\n        )\n      * on (sitegen_app) group_left ()\n        label_replace(vector(1), \"sitegen_app\", \"${jvm_app_selector}\", \"\", \"\")\n    )\n  )\n)",
               "legendFormat": "{{pod}}",
               "range": true,
               "refId": "A"
@@ -1739,7 +1739,7 @@
                 "uid": "${datasource}"
               },
               "editorMode": "code",
-              "expr": "sum by (pod, id) (\n  (\n    (\n        (\n          (\n              label_replace(\n                jvm_memory_used_bytes{application=\"rtd-admin\",area=\"heap\",job=\"rtd-admin\",namespace=\"dev\",pod=~${jvm_pod:json}},\n                \"sitegen_app\",\n                \"rtd-admin-dev\",\n                \"\",\n                \"\"\n              )\n            or\n              label_replace(\n                jvm_memory_used_bytes{application=\"user-center-application\",area=\"heap\",job=\"user-center-application\",namespace=\"dev\",pod=~${jvm_pod:json}},\n                \"sitegen_app\",\n                \"user-center-application-dev\",\n                \"\",\n                \"\"\n              )\n          )\n        )\n      * on (sitegen_app) group_left ()\n        label_replace(vector(1), \"sitegen_app\", ${jvm_app_selector:json}, \"\", \"\")\n    )\n  )\n)",
+              "expr": "sum by (pod, id) (\n  (\n    (\n        (\n          (\n              label_replace(\n                jvm_memory_used_bytes{application=\"rtd-admin\",area=\"heap\",job=\"rtd-admin\",namespace=\"dev\",pod=~\"${jvm_pod:regex}\"},\n                \"sitegen_app\",\n                \"rtd-admin-dev\",\n                \"\",\n                \"\"\n              )\n            or\n              label_replace(\n                jvm_memory_used_bytes{application=\"user-center-application\",area=\"heap\",job=\"user-center-application\",namespace=\"dev\",pod=~\"${jvm_pod:regex}\"},\n                \"sitegen_app\",\n                \"user-center-application-dev\",\n                \"\",\n                \"\"\n              )\n          )\n        )\n      * on (sitegen_app) group_left ()\n        label_replace(vector(1), \"sitegen_app\", \"${jvm_app_selector}\", \"\", \"\")\n    )\n  )\n)",
               "legendFormat": "{{pod}} / {{id}}",
               "range": true,
               "refId": "A"
@@ -1922,7 +1922,7 @@
                 "uid": "${datasource}"
               },
               "editorMode": "code",
-              "expr": "sum by (pod) (\n  (\n    (\n        (\n          (\n              label_replace(\n                rate(\n                  container_cpu_usage_seconds_total{container!=\"\",namespace=\"dev\",pod=~\"^rtd-admin-.*$\",pod=~${k8s_pod:json}}[5m]\n                ),\n                \"sitegen_app\",\n                \"rtd-admin-dev\",\n                \"\",\n                \"\"\n              )\n            or\n              label_replace(\n                rate(\n                  container_cpu_usage_seconds_total{container!=\"\",namespace=\"dev\",pod=~\"^user-center-application-.*$\",pod=~${k8s_pod:json}}[5m]\n                ),\n                \"sitegen_app\",\n                \"user-center-application-dev\",\n                \"\",\n                \"\"\n              )\n          )\n        )\n      * on (sitegen_app) group_left ()\n        label_replace(vector(1), \"sitegen_app\", ${k8s_app_selector:json}, \"\", \"\")\n    )\n  )\n)",
+              "expr": "sum by (pod) (\n  (\n    (\n        (\n          (\n              label_replace(\n                rate(\n                  container_cpu_usage_seconds_total{container!=\"\",namespace=\"dev\",pod=~\"^rtd-admin-.*$\",pod=~\"${k8s_pod:regex}\"}[5m]\n                ),\n                \"sitegen_app\",\n                \"rtd-admin-dev\",\n                \"\",\n                \"\"\n              )\n            or\n              label_replace(\n                rate(\n                  container_cpu_usage_seconds_total{container!=\"\",namespace=\"dev\",pod=~\"^user-center-application-.*$\",pod=~\"${k8s_pod:regex}\"}[5m]\n                ),\n                \"sitegen_app\",\n                \"user-center-application-dev\",\n                \"\",\n                \"\"\n              )\n          )\n        )\n      * on (sitegen_app) group_left ()\n        label_replace(vector(1), \"sitegen_app\", \"${k8s_app_selector}\", \"\", \"\")\n    )\n  )\n)",
               "legendFormat": "{{pod}}",
               "range": true,
               "refId": "A"
@@ -2003,7 +2003,7 @@
                 "uid": "${datasource}"
               },
               "editorMode": "code",
-              "expr": "sum by (pod) (\n  (\n    (\n        (\n          (\n              label_replace(\n                container_memory_working_set_bytes{container!=\"\",namespace=\"dev\",pod=~\"^rtd-admin-.*$\",pod=~${k8s_pod:json}},\n                \"sitegen_app\",\n                \"rtd-admin-dev\",\n                \"\",\n                \"\"\n              )\n            or\n              label_replace(\n                container_memory_working_set_bytes{container!=\"\",namespace=\"dev\",pod=~\"^user-center-application-.*$\",pod=~${k8s_pod:json}},\n                \"sitegen_app\",\n                \"user-center-application-dev\",\n                \"\",\n                \"\"\n              )\n          )\n        )\n      * on (sitegen_app) group_left ()\n        label_replace(vector(1), \"sitegen_app\", ${k8s_app_selector:json}, \"\", \"\")\n    )\n  )\n)",
+              "expr": "sum by (pod) (\n  (\n    (\n        (\n          (\n              label_replace(\n                container_memory_working_set_bytes{container!=\"\",namespace=\"dev\",pod=~\"^rtd-admin-.*$\",pod=~\"${k8s_pod:regex}\"},\n                \"sitegen_app\",\n                \"rtd-admin-dev\",\n                \"\",\n                \"\"\n              )\n            or\n              label_replace(\n                container_memory_working_set_bytes{container!=\"\",namespace=\"dev\",pod=~\"^user-center-application-.*$\",pod=~\"${k8s_pod:regex}\"},\n                \"sitegen_app\",\n                \"user-center-application-dev\",\n                \"\",\n                \"\"\n              )\n          )\n        )\n      * on (sitegen_app) group_left ()\n        label_replace(vector(1), \"sitegen_app\", \"${k8s_app_selector}\", \"\", \"\")\n    )\n  )\n)",
               "legendFormat": "{{pod}}",
               "range": true,
               "refId": "A"
@@ -2101,7 +2101,7 @@
                 "uid": "${datasource}"
               },
               "editorMode": "code",
-              "expr": "  sum by (pod) (\n    (\n      (\n          (\n            (\n                label_replace(\n                  rate(\n                    container_cpu_cfs_throttled_periods_total{container!=\"\",namespace=\"dev\",pod=~\"^rtd-admin-.*$\",pod=~${k8s_pod:json}}[5m]\n                  ),\n                  \"sitegen_app\",\n                  \"rtd-admin-dev\",\n                  \"\",\n                  \"\"\n                )\n              or\n                label_replace(\n                  rate(\n                    container_cpu_cfs_throttled_periods_total{container!=\"\",namespace=\"dev\",pod=~\"^user-center-application-.*$\",pod=~${k8s_pod:json}}[5m]\n                  ),\n                  \"sitegen_app\",\n                  \"user-center-application-dev\",\n                  \"\",\n                  \"\"\n                )\n            )\n          )\n        * on (sitegen_app) group_left ()\n          label_replace(vector(1), \"sitegen_app\", ${k8s_app_selector:json}, \"\", \"\")\n      )\n    )\n  )\n/\n  clamp_min(\n    sum by (pod) (\n      (\n        (\n            (\n              (\n                  label_replace(\n                    rate(\n                      container_cpu_cfs_periods_total{container!=\"\",namespace=\"dev\",pod=~\"^rtd-admin-.*$\",pod=~${k8s_pod:json}}[5m]\n                    ),\n                    \"sitegen_app\",\n                    \"rtd-admin-dev\",\n                    \"\",\n                    \"\"\n                  )\n                or\n                  label_replace(\n                    rate(\n                      container_cpu_cfs_periods_total{container!=\"\",namespace=\"dev\",pod=~\"^user-center-application-.*$\",pod=~${k8s_pod:json}}[5m]\n                    ),\n                    \"sitegen_app\",\n                    \"user-center-application-dev\",\n                    \"\",\n                    \"\"\n                  )\n              )\n            )\n          * on (sitegen_app) group_left ()\n            label_replace(vector(1), \"sitegen_app\", ${k8s_app_selector:json}, \"\", \"\")\n        )\n      )\n    ),\n    0.000000001\n  )",
+              "expr": "  sum by (pod) (\n    (\n      (\n          (\n            (\n                label_replace(\n                  rate(\n                    container_cpu_cfs_throttled_periods_total{container!=\"\",namespace=\"dev\",pod=~\"^rtd-admin-.*$\",pod=~\"${k8s_pod:regex}\"}[5m]\n                  ),\n                  \"sitegen_app\",\n                  \"rtd-admin-dev\",\n                  \"\",\n                  \"\"\n                )\n              or\n                label_replace(\n                  rate(\n                    container_cpu_cfs_throttled_periods_total{container!=\"\",namespace=\"dev\",pod=~\"^user-center-application-.*$\",pod=~\"${k8s_pod:regex}\"}[5m]\n                  ),\n                  \"sitegen_app\",\n                  \"user-center-application-dev\",\n                  \"\",\n                  \"\"\n                )\n            )\n          )\n        * on (sitegen_app) group_left ()\n          label_replace(vector(1), \"sitegen_app\", \"${k8s_app_selector}\", \"\", \"\")\n      )\n    )\n  )\n/\n  clamp_min(\n    sum by (pod) (\n      (\n        (\n            (\n              (\n                  label_replace(\n                    rate(\n                      container_cpu_cfs_periods_total{container!=\"\",namespace=\"dev\",pod=~\"^rtd-admin-.*$\",pod=~\"${k8s_pod:regex}\"}[5m]\n                    ),\n                    \"sitegen_app\",\n                    \"rtd-admin-dev\",\n                    \"\",\n                    \"\"\n                  )\n                or\n                  label_replace(\n                    rate(\n                      container_cpu_cfs_periods_total{container!=\"\",namespace=\"dev\",pod=~\"^user-center-application-.*$\",pod=~\"${k8s_pod:regex}\"}[5m]\n                    ),\n                    \"sitegen_app\",\n                    \"user-center-application-dev\",\n                    \"\",\n                    \"\"\n                  )\n              )\n            )\n          * on (sitegen_app) group_left ()\n            label_replace(vector(1), \"sitegen_app\", \"${k8s_app_selector}\", \"\", \"\")\n        )\n      )\n    ),\n    0.000000001\n  )",
               "legendFormat": "{{pod}}",
               "range": true,
               "refId": "A"
@@ -2156,7 +2156,7 @@
                 "uid": "${datasource}"
               },
               "editorMode": "code",
-              "expr": "sum by (pod, phase) (\n    (\n      (\n          (\n            (\n                label_replace(\n                  kube_pod_status_phase{namespace=\"dev\",pod=~\"^rtd-admin-.*$\",pod=~${k8s_pod:json}},\n                  \"sitegen_app\",\n                  \"rtd-admin-dev\",\n                  \"\",\n                  \"\"\n                )\n              or\n                label_replace(\n                  kube_pod_status_phase{namespace=\"dev\",pod=~\"^user-center-application-.*$\",pod=~${k8s_pod:json}},\n                  \"sitegen_app\",\n                  \"user-center-application-dev\",\n                  \"\",\n                  \"\"\n                )\n            )\n          )\n        * on (sitegen_app) group_left ()\n          label_replace(vector(1), \"sitegen_app\", ${k8s_app_selector:json}, \"\", \"\")\n      )\n    )\n  ==\n    1\n)",
+              "expr": "sum by (pod, phase) (\n    (\n      (\n          (\n            (\n                label_replace(\n                  kube_pod_status_phase{namespace=\"dev\",pod=~\"^rtd-admin-.*$\",pod=~\"${k8s_pod:regex}\"},\n                  \"sitegen_app\",\n                  \"rtd-admin-dev\",\n                  \"\",\n                  \"\"\n                )\n              or\n                label_replace(\n                  kube_pod_status_phase{namespace=\"dev\",pod=~\"^user-center-application-.*$\",pod=~\"${k8s_pod:regex}\"},\n                  \"sitegen_app\",\n                  \"user-center-application-dev\",\n                  \"\",\n                  \"\"\n                )\n            )\n          )\n        * on (sitegen_app) group_left ()\n          label_replace(vector(1), \"sitegen_app\", \"${k8s_app_selector}\", \"\", \"\")\n      )\n    )\n  ==\n    1\n)",
               "format": "table",
               "instant": true,
               "range": false,
@@ -2212,7 +2212,7 @@
                 "uid": "${datasource}"
               },
               "editorMode": "code",
-              "expr": "count by (node) (\n  (\n    (\n        (\n          (\n              label_replace(\n                kube_pod_info{namespace=\"dev\",pod=~\"^rtd-admin-.*$\",pod=~${k8s_pod:json}},\n                \"sitegen_app\",\n                \"rtd-admin-dev\",\n                \"\",\n                \"\"\n              )\n            or\n              label_replace(\n                kube_pod_info{namespace=\"dev\",pod=~\"^user-center-application-.*$\",pod=~${k8s_pod:json}},\n                \"sitegen_app\",\n                \"user-center-application-dev\",\n                \"\",\n                \"\"\n              )\n          )\n        )\n      * on (sitegen_app) group_left ()\n        label_replace(vector(1), \"sitegen_app\", ${k8s_app_selector:json}, \"\", \"\")\n    )\n  )\n)",
+              "expr": "count by (node) (\n  (\n    (\n        (\n          (\n              label_replace(\n                kube_pod_info{namespace=\"dev\",pod=~\"^rtd-admin-.*$\",pod=~\"${k8s_pod:regex}\"},\n                \"sitegen_app\",\n                \"rtd-admin-dev\",\n                \"\",\n                \"\"\n              )\n            or\n              label_replace(\n                kube_pod_info{namespace=\"dev\",pod=~\"^user-center-application-.*$\",pod=~\"${k8s_pod:regex}\"},\n                \"sitegen_app\",\n                \"user-center-application-dev\",\n                \"\",\n                \"\"\n              )\n          )\n        )\n      * on (sitegen_app) group_left ()\n        label_replace(vector(1), \"sitegen_app\", \"${k8s_app_selector}\", \"\", \"\")\n    )\n  )\n)",
               "format": "table",
               "instant": true,
               "range": false,
@@ -2233,7 +2233,7 @@
     "sitegen",
     "site:admin-dev",
     "environment:dev",
-    "sitegen-template:1.0.0+e8d6b80be72466ba",
+    "sitegen-template:1.0.0+98da00eefc3bd3ce",
     "sitegen-dashboard-template:1881d654dc427ef8"
   ],
   "templating": {
@@ -2244,7 +2244,6 @@
           "text": "",
           "value": ""
         },
-        "definition": "prometheus",
         "hide": 0,
         "label": "数据源",
         "name": "datasource",
@@ -2258,7 +2257,6 @@
           "text": "rtd-admin / dev",
           "value": "rtd-admin-dev"
         },
-        "definition": "rtd-admin-dev",
         "hide": 0,
         "label": "应用实例（HTTP）",
         "name": "http_app_selector",
@@ -2270,7 +2268,8 @@
           }
         ],
         "query": "rtd-admin-dev",
-        "type": "custom"
+        "type": "custom",
+        "valuesFormat": "csv"
       },
       {
         "current": {
@@ -2278,7 +2277,6 @@
           "text": "rtd-admin / dev",
           "value": "rtd-admin-dev"
         },
-        "definition": "rtd-admin-dev,user-center-application-dev",
         "hide": 0,
         "label": "应用实例（JVM）",
         "name": "jvm_app_selector",
@@ -2295,7 +2293,8 @@
           }
         ],
         "query": "rtd-admin-dev,user-center-application-dev",
-        "type": "custom"
+        "type": "custom",
+        "valuesFormat": "csv"
       },
       {
         "allValue": ".*",
@@ -2308,13 +2307,14 @@
           "type": "prometheus",
           "uid": "${datasource}"
         },
-        "definition": "query_result((\n    (\n      (\n          label_replace(\n            jvm_memory_used_bytes{application=\"rtd-admin\",job=\"rtd-admin\",namespace=\"dev\"},\n            \"sitegen_app\",\n            \"rtd-admin-dev\",\n            \"\",\n            \"\"\n          )\n        or\n          label_replace(\n            jvm_memory_used_bytes{application=\"user-center-application\",job=\"user-center-application\",namespace=\"dev\"},\n            \"sitegen_app\",\n            \"user-center-application-dev\",\n            \"\",\n            \"\"\n          )\n      )\n    )\n  * on (sitegen_app) group_left ()\n    label_replace(vector(1), \"sitegen_app\", ${jvm_app_selector:json}, \"\", \"\")\n))",
+        "definition": "query_result((\n    (\n      (\n          label_replace(\n            jvm_memory_used_bytes{application=\"rtd-admin\",job=\"rtd-admin\",namespace=\"dev\"},\n            \"sitegen_app\",\n            \"rtd-admin-dev\",\n            \"\",\n            \"\"\n          )\n        or\n          label_replace(\n            jvm_memory_used_bytes{application=\"user-center-application\",job=\"user-center-application\",namespace=\"dev\"},\n            \"sitegen_app\",\n            \"user-center-application-dev\",\n            \"\",\n            \"\"\n          )\n      )\n    )\n  * on (sitegen_app) group_left ()\n    label_replace(vector(1), \"sitegen_app\", \"${jvm_app_selector}\", \"\", \"\")\n))",
         "hide": 0,
         "includeAll": true,
         "label": "Pod（JVM）",
         "name": "jvm_pod",
-        "query": "query_result((\n    (\n      (\n          label_replace(\n            jvm_memory_used_bytes{application=\"rtd-admin\",job=\"rtd-admin\",namespace=\"dev\"},\n            \"sitegen_app\",\n            \"rtd-admin-dev\",\n            \"\",\n            \"\"\n          )\n        or\n          label_replace(\n            jvm_memory_used_bytes{application=\"user-center-application\",job=\"user-center-application\",namespace=\"dev\"},\n            \"sitegen_app\",\n            \"user-center-application-dev\",\n            \"\",\n            \"\"\n          )\n      )\n    )\n  * on (sitegen_app) group_left ()\n    label_replace(vector(1), \"sitegen_app\", ${jvm_app_selector:json}, \"\", \"\")\n))",
+        "query": "query_result((\n    (\n      (\n          label_replace(\n            jvm_memory_used_bytes{application=\"rtd-admin\",job=\"rtd-admin\",namespace=\"dev\"},\n            \"sitegen_app\",\n            \"rtd-admin-dev\",\n            \"\",\n            \"\"\n          )\n        or\n          label_replace(\n            jvm_memory_used_bytes{application=\"user-center-application\",job=\"user-center-application\",namespace=\"dev\"},\n            \"sitegen_app\",\n            \"user-center-application-dev\",\n            \"\",\n            \"\"\n          )\n      )\n    )\n  * on (sitegen_app) group_left ()\n    label_replace(vector(1), \"sitegen_app\", \"${jvm_app_selector}\", \"\", \"\")\n))",
         "regex": "/pod=\"([^\"]+)\"/",
+        "regexApplyTo": "value",
         "refresh": 2,
         "sort": 1,
         "type": "query"
@@ -2325,7 +2325,6 @@
           "text": "rtd-admin / dev",
           "value": "rtd-admin-dev"
         },
-        "definition": "rtd-admin-dev,user-center-application-dev",
         "hide": 0,
         "label": "应用实例（Kubernetes）",
         "name": "k8s_app_selector",
@@ -2342,7 +2341,8 @@
           }
         ],
         "query": "rtd-admin-dev,user-center-application-dev",
-        "type": "custom"
+        "type": "custom",
+        "valuesFormat": "csv"
       },
       {
         "allValue": ".*",
@@ -2355,13 +2355,14 @@
           "type": "prometheus",
           "uid": "${datasource}"
         },
-        "definition": "query_result((\n    (\n      (\n          label_replace(\n            container_memory_working_set_bytes{namespace=\"dev\",pod=~\"^rtd-admin-.*$\"},\n            \"sitegen_app\",\n            \"rtd-admin-dev\",\n            \"\",\n            \"\"\n          )\n        or\n          label_replace(\n            container_memory_working_set_bytes{namespace=\"dev\",pod=~\"^user-center-application-.*$\"},\n            \"sitegen_app\",\n            \"user-center-application-dev\",\n            \"\",\n            \"\"\n          )\n      )\n    )\n  * on (sitegen_app) group_left ()\n    label_replace(vector(1), \"sitegen_app\", ${k8s_app_selector:json}, \"\", \"\")\n))",
+        "definition": "query_result((\n    (\n      (\n          label_replace(\n            container_memory_working_set_bytes{namespace=\"dev\",pod=~\"^rtd-admin-.*$\"},\n            \"sitegen_app\",\n            \"rtd-admin-dev\",\n            \"\",\n            \"\"\n          )\n        or\n          label_replace(\n            container_memory_working_set_bytes{namespace=\"dev\",pod=~\"^user-center-application-.*$\"},\n            \"sitegen_app\",\n            \"user-center-application-dev\",\n            \"\",\n            \"\"\n          )\n      )\n    )\n  * on (sitegen_app) group_left ()\n    label_replace(vector(1), \"sitegen_app\", \"${k8s_app_selector}\", \"\", \"\")\n))",
         "hide": 0,
         "includeAll": true,
         "label": "Pod（Kubernetes）",
         "name": "k8s_pod",
-        "query": "query_result((\n    (\n      (\n          label_replace(\n            container_memory_working_set_bytes{namespace=\"dev\",pod=~\"^rtd-admin-.*$\"},\n            \"sitegen_app\",\n            \"rtd-admin-dev\",\n            \"\",\n            \"\"\n          )\n        or\n          label_replace(\n            container_memory_working_set_bytes{namespace=\"dev\",pod=~\"^user-center-application-.*$\"},\n            \"sitegen_app\",\n            \"user-center-application-dev\",\n            \"\",\n            \"\"\n          )\n      )\n    )\n  * on (sitegen_app) group_left ()\n    label_replace(vector(1), \"sitegen_app\", ${k8s_app_selector:json}, \"\", \"\")\n))",
+        "query": "query_result((\n    (\n      (\n          label_replace(\n            container_memory_working_set_bytes{namespace=\"dev\",pod=~\"^rtd-admin-.*$\"},\n            \"sitegen_app\",\n            \"rtd-admin-dev\",\n            \"\",\n            \"\"\n          )\n        or\n          label_replace(\n            container_memory_working_set_bytes{namespace=\"dev\",pod=~\"^user-center-application-.*$\"},\n            \"sitegen_app\",\n            \"user-center-application-dev\",\n            \"\",\n            \"\"\n          )\n      )\n    )\n  * on (sitegen_app) group_left ()\n    label_replace(vector(1), \"sitegen_app\", \"${k8s_app_selector}\", \"\", \"\")\n))",
         "regex": "/pod=\"([^\"]+)\"/",
+        "regexApplyTo": "value",
         "refresh": 2,
         "sort": 1,
         "type": "query"

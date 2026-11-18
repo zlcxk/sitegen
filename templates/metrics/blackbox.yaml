@@ -5,6 +5,9 @@ profiles:
     target: domain
     scope: domain
     auto: true
+    discovery:
+      metric: probe_success
+      groupBy: [job, instance]
     panels:
       - id: blackbox-availability
         name: 站点可用性

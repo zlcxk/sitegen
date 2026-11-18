@@ -208,7 +208,7 @@ func TestRenderApplicationQueryFiltersByProfileSelector(t *testing.T) {
 	if !strings.Contains(query, "sitegen_app") {
 		t.Fatal("query must carry a derived application identity label")
 	}
-	if !strings.Contains(query, `${http_app_selector:json}`) {
+	if !strings.Contains(query, `"${http_app_selector}"`) {
 		t.Fatalf("profile selector must use Grafana JSON escaping:\n%s", query)
 	}
 	if strings.Contains(query, "[5m:]") {
@@ -219,16 +219,16 @@ func TestRenderApplicationQueryFiltersByProfileSelector(t *testing.T) {
 func TestRenderApplicationQueryHandlesVariableBraces(t *testing.T) {
 	site := selectorSite()
 	query := renderApp(t,
-		"sum by (pod) (my_metric{%SELECTOR%, area=\"heap\", pod=~${jvm_pod:json}})",
+		"sum by (pod) (my_metric{%SELECTOR%, area=\"heap\", pod=~\"${jvm_pod:regex}\"})",
 		site.Spec.Applications[:1], true, "jvm_app_selector")
 	compact := compactPromQL(query)
-	if !strings.Contains(compact, `pod=~${jvm_pod:json}`) {
+	if !strings.Contains(compact, `pod=~"${jvm_pod:regex}"`) {
 		t.Fatalf("pod variable token was damaged:\n%s", query)
 	}
 	if strings.Count(compact, "label_replace(") != 2 {
 		t.Fatalf("unexpected label_replace rendering:\n%s", query)
 	}
-	if !strings.Contains(query, `${jvm_app_selector:json}`) {
+	if !strings.Contains(query, `"${jvm_app_selector}"`) {
 		t.Fatalf("profile selector missing:\n%s", query)
 	}
 }
@@ -238,7 +238,7 @@ func TestRenderNamespaceQueryJoinsDeclaredPodOwnership(t *testing.T) {
 	query := renderNamespace(t, "sum by (pod) (rate(container_metric{%SELECTOR%}[5m]))", site.Spec.Applications[:1], false, "k8s_app_selector")
 	for _, want := range []string{
 		`namespace="test"`,
-		`pod=~${k8s_pod:json}`,
+		`pod=~"${k8s_pod:regex}"`,
 		`kube_pod_labels`,
 		`label_app="app-a"`,
 		`on (namespace, pod)`,
@@ -309,6 +309,27 @@ func TestContainerMatchersOnlyApplyToCAdvisorMetrics(t *testing.T) {
 	}
 }
 
+func TestRenderCheckQueryHandlesQuotedVariables(t *testing.T) {
+	site := selectorSite()
+	query := `sum(rate(test_metric{%SELECTOR%, pod=~"${jvm_pod:regex}"}))`
+	out := RenderCheckQuery(query, site, "")
+	if strings.Contains(out, "${") {
+		t.Fatalf("check query still contains a Grafana variable: %s", out)
+	}
+	if !strings.Contains(out, `pod=~".+"`) {
+		t.Fatalf("quoted pod regex variable was not substituted safely: %s", out)
+	}
+
+	appFilter := `label_replace(vector(1), "sitegen_app", ${jvm_app_selector}, "", "")`
+	appOut := RenderCheckQuery(appFilter, site, "")
+	if !strings.Contains(appOut, `"app-a-test"`) {
+		t.Fatalf("app selector was not substituted as a quoted string: %s", appOut)
+	}
+	if strings.Contains(appOut, `"sitegen_app", app-a-test`) {
+		t.Fatalf("app selector substitution produced an unquoted value: %s", appOut)
+	}
+}
+
 func TestRenderJobQueryUsesOnlyJobAndTargetLabels(t *testing.T) {
 	site := selectorSite()
 	app := site.Spec.Applications[0]
@@ -347,7 +368,7 @@ func TestBuildPodVariableExpressionUsesCurrentApplication(t *testing.T) {
 		`label_app="app-a"`,
 		`namespace="test"`,
 		`sitegen_app`,
-		`${k8s_app_selector:json}`,
+		`"${k8s_app_selector}"`,
 	} {
 		if !strings.Contains(compact, want) {
 			t.Errorf("pod variable expression missing %q:\n%s", want, expr)

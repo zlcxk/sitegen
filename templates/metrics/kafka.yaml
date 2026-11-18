@@ -5,6 +5,9 @@ profiles:
     target: component
     scope: component
     componentTypes: [kafka]
+    discovery:
+      metric: kafka_brokers
+      groupBy: [job]
     panels:
       - id: kafka-brokers
         name: Kafka Broker 数

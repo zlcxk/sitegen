@@ -14,6 +14,7 @@ import (
 	"github.com/prometheus/client_golang/api"
 	promv1 "github.com/prometheus/client_golang/api/prometheus/v1"
 	"github.com/prometheus/common/model"
+	"github.com/prometheus/prometheus/promql/parser"
 )
 
 // Config describes a Prometheus connection. Credentials must be supplied by
@@ -155,13 +156,96 @@ func (c *Client) MetricExists(ctx context.Context, metric string, start, end tim
 
 // Query executes an instant query. Empty results are not errors.
 func (c *Client) Query(ctx context.Context, expr string) (model.Value, error) {
+	return c.QueryAt(ctx, expr, time.Now())
+}
+
+// QueryAt executes an instant query at a deterministic timestamp.
+func (c *Client) QueryAt(ctx context.Context, expr string, at time.Time) (model.Value, error) {
 	ctx, cancel := context.WithTimeout(ctx, c.timeout)
 	defer cancel()
-	value, _, _, err := c.api.Query(ctx, expr, time.Now(), promv1.WithTimeout(c.timeout))
+	value, _, _, err := c.api.Query(ctx, expr, at, promv1.WithTimeout(c.timeout))
 	if err != nil {
 		return nil, fmt.Errorf("PromQL 执行失败: %w", err)
 	}
 	return value, nil
+}
+
+// QueryRange executes a range query. Discovery uses it only to distinguish a
+// metric that exists historically from one that is currently being scraped.
+func (c *Client) QueryRange(ctx context.Context, expr string, start, end time.Time, step time.Duration) (model.Value, error) {
+	ctx, cancel := context.WithTimeout(ctx, c.timeout)
+	defer cancel()
+	value, _, _, err := c.api.QueryRange(ctx, expr, promv1.Range{
+		Start: start,
+		End:   end,
+		Step:  step,
+	}, promv1.WithTimeout(c.timeout))
+	if err != nil {
+		return nil, fmt.Errorf("PromQL range 执行失败: %w", err)
+	}
+	return value, nil
+}
+
+// MetricNames returns the metric names known in the window.
+func (c *Client) MetricNames(ctx context.Context, start, end time.Time) ([]string, error) {
+	return c.LabelValues(ctx, "__name__", "", start, end)
+}
+
+// LabelNames returns label names for a legal metric selector. An empty match
+// asks Prometheus for all label names in the window.
+func (c *Client) LabelNames(ctx context.Context, match string, start, end time.Time) ([]string, error) {
+	ctx, cancel := context.WithTimeout(ctx, c.timeout)
+	defer cancel()
+	var matches []string
+	if strings.TrimSpace(match) != "" {
+		matches = []string{match}
+	}
+	values, _, _, err := c.api.LabelNames(ctx, matches, start, end, promv1.WithTimeout(c.timeout))
+	if err != nil {
+		return nil, fmt.Errorf("Prometheus 标签名查询失败: %w", err)
+	}
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		out = append(out, string(value))
+	}
+	return out, nil
+}
+
+// LabelValues returns values for one label, optionally constrained by a legal
+// Series Selector (for example `up{job="prometheus"}`).
+func (c *Client) LabelValues(ctx context.Context, label, match string, start, end time.Time) ([]string, error) {
+	ctx, cancel := context.WithTimeout(ctx, c.timeout)
+	defer cancel()
+	var matches []string
+	if strings.TrimSpace(match) != "" {
+		if !looksLikeSelector(match) {
+			return nil, fmt.Errorf("标签值查询的 match 必须是合法的 Series Selector，不能是 PromQL 表达式: %q", match)
+		}
+		matches = []string{match}
+	}
+	values, _, _, err := c.api.LabelValues(ctx, label, matches, start, end, promv1.WithTimeout(c.timeout))
+	if err != nil {
+		return nil, fmt.Errorf("Prometheus 标签值查询失败: %w", err)
+	}
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		out = append(out, string(value))
+	}
+	return out, nil
+}
+
+var metricSelectorParser = parser.NewParser(parser.Options{})
+
+// looksLikeSelector rejects arbitrary PromQL being passed to match[]. The
+// Prometheus parser is the authority: match[] accepts a metric name with label
+// matchers, not an aggregation or arithmetic expression.
+func looksLikeSelector(match string) bool {
+	match = strings.TrimSpace(match)
+	if match == "" {
+		return true
+	}
+	_, err := metricSelectorParser.ParseMetricSelector(match)
+	return err == nil
 }
 
 // IsEmpty reports whether a query returned no series.
