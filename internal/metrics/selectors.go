@@ -2,6 +2,7 @@ package metrics
 
 import (
 	"sort"
+	"strconv"
 	"strings"
 
 	"site-observability/internal/config"
@@ -9,68 +10,135 @@ import (
 
 var selectorToken = "%SELECTOR%"
 
-// QuoteLabelValue returns a PromQL-safe double-quoted string literal.
+// QuoteLabelValue returns a PromQL-safe double-quoted string literal. The
+// PromQL parser accepts Go string escapes, so strconv.Quote covers quotes,
+// backslashes, newlines and every other control byte consistently.
 func QuoteLabelValue(value string) string {
-	replacer := strings.NewReplacer(
-		`\`, `\\`,
-		`"`, `\"`,
-		"\n", `\n`,
-		"\r", `\r`,
-		"\t", `\t`,
-	)
-	return `"` + replacer.Replace(value) + `"`
+	return strconv.Quote(value)
 }
 
-// ApplicationTargetSelector renders an exact selector for a single app,
-// including every configured extra Prometheus label. This is the atomic unit
-// of application correlation: application, namespace, job and extra labels
-// are always kept together as one object.
-func ApplicationTargetSelector(app config.Application) string {
-	parts := []string{
-		`application=` + QuoteLabelValue(app.Application),
-		`namespace=` + QuoteLabelValue(app.Namespace),
+// LabelCondition is one equality condition in a selector. Regex conditions are
+// reserved for future use; configured selectors are exact equality so that
+// independent label alternation can never cross-match objects.
+type LabelCondition struct {
+	Name  string
+	Value string
+	Regex bool
+}
+
+// String renders one selector condition.
+func (c LabelCondition) String() string {
+	operator := "="
+	if c.Regex {
+		operator = "=~"
+	}
+	return c.Name + operator + QuoteLabelValue(c.Value)
+}
+
+// Selector is the single object used both to generate PromQL and to explain a
+// failed check. Reporting cannot drift from the query that was actually run.
+type Selector struct {
+	Conditions []LabelCondition
+}
+
+// NewSelector builds a selector from ordered conditions.
+func NewSelector(conditions ...LabelCondition) Selector {
+	return Selector{Conditions: conditions}
+}
+
+// String renders the inner matcher list without braces.
+func (s Selector) String() string {
+	parts := make([]string, 0, len(s.Conditions))
+	for _, condition := range s.Conditions {
+		parts = append(parts, condition.String())
+	}
+	return strings.Join(parts, ", ")
+}
+
+// Append returns a copy with extra equality conditions.
+func (s Selector) Append(conditions ...LabelCondition) Selector {
+	out := Selector{Conditions: make([]LabelCondition, 0, len(s.Conditions)+len(conditions))}
+	out.Conditions = append(out.Conditions, s.Conditions...)
+	out.Conditions = append(out.Conditions, conditions...)
+	return out
+}
+
+// Empty reports whether the selector has no conditions.
+func (s Selector) Empty() bool { return len(s.Conditions) == 0 }
+
+// ApplicationSelector renders an exact selector for a single app, including
+// every configured extra Prometheus label. This is the atomic unit of
+// application correlation: application, namespace, job and extra labels are
+// always kept together as one object.
+func ApplicationSelector(app config.Application) Selector {
+	conditions := []LabelCondition{
+		{Name: "application", Value: app.Application},
+		{Name: "namespace", Value: app.Namespace},
 	}
 	if app.Prometheus.Job != "" {
-		parts = append(parts, `job=`+QuoteLabelValue(app.Prometheus.Job))
+		conditions = append(conditions, LabelCondition{Name: "job", Value: app.Prometheus.Job})
 	}
 	for _, key := range sortedKeys(app.Prometheus.Labels) {
 		if reservedAppLabel(key) {
 			continue
 		}
-		parts = append(parts, key+"="+QuoteLabelValue(app.Prometheus.Labels[key]))
+		conditions = append(conditions, LabelCondition{Name: key, Value: app.Prometheus.Labels[key]})
 	}
-	return strings.Join(parts, ", ")
+	return NewSelector(conditions...)
 }
 
-// TargetSelector renders the selector used for the Prometheus `up` metric.
+// ApplicationTargetSelector is the string form used by templates.
+func ApplicationTargetSelector(app config.Application) string {
+	return ApplicationSelector(app).String()
+}
+
+// TargetSelectorFor renders the selector used for the Prometheus `up` metric.
 // It contains only the scrape job and explicitly configured targetLabels.
 // Application identity labels are deliberately NOT added.
-func TargetSelector(app config.Application) string {
-	parts := make([]string, 0, 1+len(app.Prometheus.TargetLabels))
+func TargetSelectorFor(app config.Application) Selector {
+	conditions := make([]LabelCondition, 0, 1+len(app.Prometheus.TargetLabels))
 	if app.Prometheus.Job != "" {
-		parts = append(parts, `job=`+QuoteLabelValue(app.Prometheus.Job))
+		conditions = append(conditions, LabelCondition{Name: "job", Value: app.Prometheus.Job})
 	}
 	for _, key := range sortedKeys(app.Prometheus.TargetLabels) {
-		parts = append(parts, key+"="+QuoteLabelValue(app.Prometheus.TargetLabels[key]))
+		conditions = append(conditions, LabelCondition{Name: key, Value: app.Prometheus.TargetLabels[key]})
 	}
-	return strings.Join(parts, ", ")
+	return NewSelector(conditions...)
 }
 
-// ComponentSelector renders an exact component selector.
-func ComponentSelector(component config.Component) string {
-	parts := []string{`job=` + QuoteLabelValue(component.Prometheus.Job)}
+// TargetSelector is the string form used by templates.
+func TargetSelector(app config.Application) string {
+	return TargetSelectorFor(app).String()
+}
+
+// ComponentSelectorFor renders an exact component selector.
+func ComponentSelectorFor(component config.Component) Selector {
+	conditions := []LabelCondition{{Name: "job", Value: component.Prometheus.Job}}
 	if component.Prometheus.Instance != "" {
-		parts = append(parts, `instance=`+QuoteLabelValue(component.Prometheus.Instance))
+		conditions = append(conditions, LabelCondition{Name: "instance", Value: component.Prometheus.Instance})
 	}
 	for _, key := range sortedKeys(component.Prometheus.Labels) {
-		parts = append(parts, key+"="+QuoteLabelValue(component.Prometheus.Labels[key]))
+		conditions = append(conditions, LabelCondition{Name: key, Value: component.Prometheus.Labels[key]})
 	}
-	return strings.Join(parts, ", ")
+	return NewSelector(conditions...)
 }
 
-// DomainSelector renders an exact Blackbox selector.
+// ComponentSelector is the string form used by templates.
+func ComponentSelector(component config.Component) string {
+	return ComponentSelectorFor(component).String()
+}
+
+// DomainSelectorFor renders an exact Blackbox selector.
+func DomainSelectorFor(domain config.Domain) Selector {
+	return NewSelector(
+		LabelCondition{Name: "job", Value: domain.Blackbox.Job},
+		LabelCondition{Name: "instance", Value: domain.Blackbox.Instance},
+	)
+}
+
+// DomainSelector is the string form used by templates.
 func DomainSelector(domain config.Domain) string {
-	return `job=` + QuoteLabelValue(domain.Blackbox.Job) + `, instance=` + QuoteLabelValue(domain.Blackbox.Instance)
+	return DomainSelectorFor(domain).String()
 }
 
 // RenderQuery injects a selector into a metric query template.

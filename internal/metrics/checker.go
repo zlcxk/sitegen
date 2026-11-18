@@ -38,10 +38,112 @@ type Checker struct {
 	Options  CheckOptions
 }
 
+// taskGate lets dependent checks wait for prerequisite checks without holding
+// a concurrency slot. This makes the SKIP propagation deadlock-free.
+type taskGate interface {
+	wait(context.Context) bool
+}
+
+type profileGate struct {
+	mu        sync.Mutex
+	pending   int
+	empty     bool
+	done      chan struct{}
+	matched   map[string]bool
+	closeOnce sync.Once
+}
+
+func newProfileGate(required map[string][]string) *profileGate {
+	g := &profileGate{
+		pending: len(required),
+		empty:   len(required) == 0,
+		done:    make(chan struct{}),
+		matched: make(map[string]bool, len(required)),
+	}
+	if g.empty {
+		close(g.done)
+	}
+	return g
+}
+
+func (g *profileGate) record(metric string, matched bool) {
+	g.mu.Lock()
+	if _, exists := g.matched[metric]; !exists {
+		g.matched[metric] = matched
+		if g.pending > 0 {
+			g.pending--
+		}
+	}
+	shouldClose := g.pending <= 0
+	g.mu.Unlock()
+	if shouldClose {
+		g.closeOnce.Do(func() { close(g.done) })
+	}
+}
+
+func (g *profileGate) wait(ctx context.Context) bool {
+	select {
+	case <-g.done:
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
+
+func (g *profileGate) anyMatched() bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.empty {
+		return true
+	}
+	for _, matched := range g.matched {
+		if matched {
+			return true
+		}
+	}
+	return false
+}
+
+// podOwnership memoizes the Pod association result so the coverage and
+// container-filter checks never repeat the same failure.
+type podOwnership struct {
+	done     chan struct{}
+	closeOne sync.Once
+	status   output.Status
+	detail   string
+	pods     map[string]bool
+}
+
+func newPodOwnership() *podOwnership {
+	return &podOwnership{done: make(chan struct{}), pods: map[string]bool{}}
+}
+
+func (p *podOwnership) wait(ctx context.Context) bool {
+	select {
+	case <-p.done:
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
+
+func (p *podOwnership) finish(check output.Check, pods map[string]bool) output.Check {
+	p.status = check.Status
+	p.detail = check.Detail
+	if pods != nil {
+		p.pods = pods
+	}
+	p.closeOne.Do(func() { close(p.done) })
+	return check
+}
+
 type checkTask struct {
 	category string
 	name     string
 	run      func(context.Context) output.Check
+	gates    []taskGate
+	// skip is evaluated only after all gates are ready.
+	skip func() (bool, string)
 }
 
 func (c *Checker) check(category, name string, status output.Status, detail string) output.Check {
@@ -94,6 +196,18 @@ func (c *Checker) Run(ctx context.Context) []output.Check {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			for _, gate := range tasks[i].gates {
+				if !gate.wait(ctx) {
+					results[i] = c.check(tasks[i].category, tasks[i].name, output.Fail, "校验被取消")
+					return
+				}
+			}
+			if tasks[i].skip != nil {
+				if skip, detail := tasks[i].skip(); skip {
+					results[i] = c.check(tasks[i].category, tasks[i].name, output.Skip, detail)
+					return
+				}
+			}
 			select {
 			case sem <- struct{}{}:
 				defer func() { <-sem }()
@@ -115,13 +229,15 @@ func (c *Checker) domainTasks(now time.Time, lookback time.Duration) []checkTask
 		return tasks
 	}
 	for _, domain := range c.Site.Spec.Domains {
-		selector := DomainSelector(domain)
+		selector := DomainSelectorFor(domain)
 		required, optional := profileRequirements(profile)
-		tasks = append(tasks, c.metricTasks("站点 "+domain.ID, selector, required, optional, now, lookback)...)
+		gate := newProfileGate(required)
+		tasks = append(tasks, c.metricTasks("站点 "+domain.ID, selector, required, optional, gate, now, lookback)...)
 		for _, panel := range profile.Panels {
 			panel := panel
-			query := RenderCheckQuery(panel.Query, c.Site, selector)
-			tasks = append(tasks, c.queryTask("Blackbox/"+domain.ID+"/"+panel.ID, query))
+			query := RenderCheckQuery(panel.Query, c.Site, selector.String())
+			tasks = append(tasks, c.queryTask("Blackbox/"+domain.ID+"/"+panel.ID, query, []taskGate{gate},
+				dependencySkip(gate, lookback)))
 		}
 	}
 	return tasks
@@ -134,14 +250,19 @@ func (c *Checker) applicationTasks(now time.Time, lookback time.Duration) []chec
 		return tasks
 	}
 
+	gates := map[string]*profileGate{}
+	ownerships := map[string]*podOwnership{}
 	namespaceChecked := map[string]bool{}
+
 	for _, app := range apps {
 		for _, profile := range c.activeApplicationProfiles(app) {
 			required, optional := profileRequirements(profile)
+			gate := newProfileGate(required)
 			switch profile.Scope {
 			case ScopeApplication:
-				selector := ApplicationTargetSelector(app)
-				tasks = append(tasks, c.metricTasks("应用 "+app.ID, selector, required, optional, now, lookback)...)
+				gates[app.ID+"\x00"+profile.ID] = gate
+				selector := ApplicationSelector(app)
+				tasks = append(tasks, c.metricTasks("应用 "+app.ID, selector, required, optional, gate, now, lookback)...)
 				for _, panel := range profile.Panels {
 					if panel.Aggregation == AggregationSite {
 						continue
@@ -152,7 +273,8 @@ func (c *Checker) applicationTasks(now time.Time, lookback time.Duration) []chec
 						tasks = append(tasks, c.failTask("PromQL", name, err.Error()))
 						continue
 					}
-					tasks = append(tasks, c.queryTask(name, RenderCheckQuery(query, c.Site, "")))
+					tasks = append(tasks, c.queryTask(name, RenderCheckQuery(query, c.Site, ""), []taskGate{gate},
+						dependencySkip(gate, lookback)))
 				}
 			case ScopeNamespace:
 				if app.Kubernetes.PodSelector == nil {
@@ -160,8 +282,16 @@ func (c *Checker) applicationTasks(now time.Time, lookback time.Duration) []chec
 						"未配置 kubernetes.podSelector；跳过应用级 Kubernetes 查询，避免纳入同 Namespace 其他应用 Pod"))
 					continue
 				}
-				selector := `namespace=` + QuoteLabelValue(app.Namespace)
-				tasks = append(tasks, c.metricTasks("应用 "+app.ID, selector, required, optional, now, lookback)...)
+				gates[app.ID+"\x00"+profile.ID] = gate
+				selector := NewSelector(LabelCondition{Name: "namespace", Value: app.Namespace})
+				tasks = append(tasks, c.metricTasks("应用 "+app.ID, selector, required, optional, gate, now, lookback)...)
+
+				ownership := ownerships[app.ID]
+				if ownership == nil {
+					ownership = newPodOwnership()
+					ownerships[app.ID] = ownership
+					tasks = append(tasks, c.podOwnershipTask(app, ownership, now, lookback))
+				}
 				for _, panel := range profile.Panels {
 					name := "应用/" + app.ID + "/" + profile.ID + "/" + panel.ID
 					query, err := RenderNamespaceQuery(panel.Query, []config.Application{app}, false, "")
@@ -169,14 +299,15 @@ func (c *Checker) applicationTasks(now time.Time, lookback time.Duration) []chec
 						tasks = append(tasks, c.failTask("PromQL", name, err.Error()))
 						continue
 					}
-					tasks = append(tasks, c.queryTask(name, RenderCheckQuery(query, c.Site, "")))
+					tasks = append(tasks, c.queryTask(name, RenderCheckQuery(query, c.Site, ""), []taskGate{gate, ownership},
+						namespaceDependencySkip(gate, ownership, lookback)))
 				}
 				if !namespaceChecked[app.Namespace] {
 					namespaceChecked[app.Namespace] = true
 					tasks = append(tasks, c.namespaceExistenceTask(app, now, lookback))
 				}
-				tasks = append(tasks, c.podAssociationTasks(app, now, lookback)...)
-				tasks = append(tasks, c.kubernetesCoverageTasks(app, now, lookback)...)
+				tasks = append(tasks, c.kubernetesCoverageTasks(app, ownership, now, lookback)...)
+				tasks = append(tasks, c.containerMatcherTasks(app, ownership, now, lookback)...)
 			}
 		}
 	}
@@ -201,6 +332,12 @@ func (c *Checker) applicationTasks(now time.Time, lookback time.Duration) []chec
 			}
 			continue
 		}
+		var entryGates []*profileGate
+		for _, app := range entry {
+			if gate, ok := gates[app.ID+"\x00"+profile.ID]; ok {
+				entryGates = append(entryGates, gate)
+			}
+		}
 		for _, panel := range sitePanels {
 			name := "站点/" + profile.ID + "/" + panel.ID
 			query, err := RenderApplicationQuery(panel.Query, entry, false, "")
@@ -208,19 +345,22 @@ func (c *Checker) applicationTasks(now time.Time, lookback time.Duration) []chec
 				tasks = append(tasks, c.failTask("PromQL", name, err.Error()))
 				continue
 			}
-			tasks = append(tasks, c.queryTask(name, RenderCheckQuery(query, c.Site, "")))
+			tasks = append(tasks, c.queryTask(name, RenderCheckQuery(query, c.Site, ""), profileGates(entryGates),
+				anyDependencySkip(entryGates, lookback)))
 		}
 	}
 
 	// Auto application health profile (up by job).
 	if auto, ok := c.Registry.AutoProfile("platform"); ok {
 		required, optional := profileRequirements(auto)
+		var upGates []*profileGate
 		for _, app := range apps {
 			if app.Prometheus.Job == "" {
 				continue
 			}
-			selector := TargetSelector(app)
-			tasks = append(tasks, c.metricTasks("应用 "+app.ID, selector, required, optional, now, lookback)...)
+			gate := newProfileGate(required)
+			upGates = append(upGates, gate)
+			tasks = append(tasks, c.metricTasks("应用 "+app.ID, TargetSelectorFor(app), required, optional, gate, now, lookback)...)
 		}
 		for _, panel := range auto.Panels {
 			name := "平台/" + panel.ID
@@ -229,7 +369,8 @@ func (c *Checker) applicationTasks(now time.Time, lookback time.Duration) []chec
 				tasks = append(tasks, c.failTask("PromQL", name, err.Error()))
 				continue
 			}
-			tasks = append(tasks, c.queryTask(name, RenderCheckQuery(query, c.Site, "")))
+			tasks = append(tasks, c.queryTask(name, RenderCheckQuery(query, c.Site, ""), profileGates(upGates),
+				anyDependencySkip(upGates, lookback)))
 		}
 	}
 	return tasks
@@ -247,6 +388,52 @@ func applicationProfiles(registry *Registry) []*Profile {
 	return out
 }
 
+func profileGates(gates []*profileGate) []taskGate {
+	out := make([]taskGate, 0, len(gates))
+	for _, gate := range gates {
+		out = append(out, gate)
+	}
+	return out
+}
+
+func dependencySkip(gate *profileGate, lookback time.Duration) func() (bool, string) {
+	return func() (bool, string) {
+		if gate.anyMatched() {
+			return false, ""
+		}
+		return true, fmt.Sprintf("依赖的基础指标在近 %s 内没有匹配序列；根因已在上方指标检查中报告，跳过该下游查询",
+			formatLookback(lookback))
+	}
+}
+
+func anyDependencySkip(gates []*profileGate, lookback time.Duration) func() (bool, string) {
+	if len(gates) == 0 {
+		return nil
+	}
+	return func() (bool, string) {
+		for _, gate := range gates {
+			if gate.anyMatched() {
+				return false, ""
+			}
+		}
+		return true, fmt.Sprintf("所有入口应用的基础指标在近 %s 内都没有匹配序列；根因已在上方指标检查中报告，跳过该下游查询",
+			formatLookback(lookback))
+	}
+}
+
+func namespaceDependencySkip(gate *profileGate, ownership *podOwnership, lookback time.Duration) func() (bool, string) {
+	return func() (bool, string) {
+		if !gate.anyMatched() {
+			return true, fmt.Sprintf("依赖的基础指标在近 %s 内没有匹配序列；根因已在上方指标检查中报告，跳过该下游查询",
+				formatLookback(lookback))
+		}
+		if ownership.status == output.Fail {
+			return true, "Pod 归属未通过，无法确定查询范围；根因已在 Pod 归属检查中报告，跳过该下游查询"
+		}
+		return false, ""
+	}
+}
+
 func (c *Checker) namespaceExistenceTask(app config.Application, now time.Time, lookback time.Duration) checkTask {
 	name := "Namespace/" + app.Namespace
 	return checkTask{
@@ -261,14 +448,15 @@ func (c *Checker) namespaceExistenceTask(app config.Application, now time.Time, 
 				return c.check("Prometheus", name, output.Warn,
 					"kube_pod_info 不存在，无法独立验证 Namespace；将继续通过 Pod 归属规则校验")
 			}
-			selector := `namespace=` + QuoteLabelValue(app.Namespace)
-			series, err := c.API.Series(ctx, "kube_pod_info{"+selector+"}", now.Add(-lookback), now)
+			selector := NewSelector(LabelCondition{Name: "namespace", Value: app.Namespace})
+			series, err := c.API.Series(ctx, "kube_pod_info{"+selector.String()+"}", now.Add(-lookback), now)
 			if err != nil {
 				return c.check("Prometheus", name, output.Fail, requestErrorDetail(err))
 			}
 			if len(series) == 0 {
 				return c.check("Prometheus", name, output.Fail,
-					fmt.Sprintf("Namespace %q 在近 %s 内没有 kube_pod_info 序列；请检查 Namespace 名称与采集范围", app.Namespace, lookback))
+					fmt.Sprintf("Namespace %q 在近 %s 内没有 kube_pod_info 序列；请检查 Namespace 名称与采集范围\n\n实际 Selector:\n%s",
+						app.Namespace, formatLookback(lookback), selector.String()))
 			}
 			return c.check("Prometheus", name, output.Pass,
 				fmt.Sprintf("Namespace %q 存在，kube_pod_info 序列 %d 条", app.Namespace, len(series)))
@@ -276,101 +464,158 @@ func (c *Checker) namespaceExistenceTask(app config.Application, now time.Time, 
 	}
 }
 
-func (c *Checker) podAssociationTasks(app config.Application, now time.Time, lookback time.Duration) []checkTask {
-	tasks := c.containerMatcherTasks(app, now, lookback)
+func (c *Checker) podOwnershipTask(app config.Application, ownership *podOwnership, now time.Time, lookback time.Duration) checkTask {
+	selector := app.Kubernetes.PodSelector
+	name := "Pod 归属/" + app.ID
+	if selector != nil && selector.Mode == config.PodSelectorLabels {
+		name += "/" + selector.PodLabelMetric()
+	}
+	return checkTask{
+		category: "Prometheus",
+		name:     name,
+		run: func(ctx context.Context) output.Check {
+			check, pods := c.computePodOwnership(ctx, app, now, lookback)
+			return ownership.finish(check, pods)
+		},
+	}
+}
+
+func (c *Checker) computePodOwnership(ctx context.Context, app config.Application, now time.Time, lookback time.Duration) (output.Check, map[string]bool) {
 	ps := app.Kubernetes.PodSelector
+	name := "Pod 归属/" + app.ID
 	if ps == nil {
-		return tasks
+		return c.check("Prometheus", name, output.Fail, "未配置 podSelector"), nil
 	}
 	switch ps.Mode {
 	case config.PodSelectorLabels:
 		metric := ps.PodLabelMetric()
-		return append(tasks, checkTask{
-			category: "Prometheus",
-			name:     "Pod 归属/" + app.ID + "/" + metric,
-			run: func(ctx context.Context) output.Check {
-				exists, err := c.API.MetricExists(ctx, metric, now.Add(-7*24*time.Hour), now)
-				if err != nil {
-					return c.check("Prometheus", "Pod 归属/"+app.ID+"/"+metric, output.Fail, requestErrorDetail(err))
-				}
-				if !exists {
-					return c.check("Prometheus", "Pod 归属/"+app.ID+"/"+metric, output.Fail,
-						"Pod 归属指标 "+metric+" 不存在（近 7 天无序列）")
-				}
-				selector := `namespace=` + QuoteLabelValue(app.Namespace)
-				for _, key := range sortedKeys(ps.Matchers) {
-					selector += ", " + key + "=" + QuoteLabelValue(ps.Matchers[key])
-				}
-				series, err := c.API.Series(ctx, metric+"{"+selector+"}", now.Add(-lookback), now)
-				if err != nil {
-					return c.check("Prometheus", "Pod 归属/"+app.ID+"/"+metric, output.Fail, requestErrorDetail(err))
-				}
-				if len(series) == 0 {
-					return c.check("Prometheus", "Pod 归属/"+app.ID+"/"+metric, output.Warn,
-						fmt.Sprintf("配置的 Pod 标签在近 %s 内没有匹配序列", lookback))
-				}
-				for _, key := range sortedKeys(ps.Matchers) {
-					count := countLabel(series, key)
-					if count == 0 {
-						return c.check("Prometheus", "Pod 归属/"+app.ID+"/"+metric, output.Warn,
-							fmt.Sprintf("匹配序列 %d 条，但没有任何序列带有标签 %s；无法建立可靠的 Pod 归属，应用级 Kubernetes 面板可能无数据", len(series), key))
-					}
-				}
-				if count := countLabel(series, "pod"); count != len(series) {
-					return c.check("Prometheus", "Pod 归属/"+app.ID+"/"+metric, output.Warn,
-						fmt.Sprintf("匹配序列 %d 条，存在 pod 标签 %d 条；无法建立完整 Pod 集合", len(series), count))
-				}
-				pods := labelSet(series, "pod")
-				cadvisorSelector := `namespace=` + QuoteLabelValue(app.Namespace) + `, pod=~".+"`
-				cadvisorSeries, err := c.API.Series(ctx, "container_memory_working_set_bytes{"+cadvisorSelector+"}", now.Add(-lookback), now)
-				if err != nil {
-					return c.check("Prometheus", "Pod 归属/"+app.ID+"/"+metric, output.Fail, requestErrorDetail(err))
-				}
-				matched := 0
-				for pod := range labelSet(cadvisorSeries, "pod") {
-					if pods[pod] {
-						matched++
-					}
-				}
-				if matched == 0 {
-					return c.check("Prometheus", "Pod 归属/"+app.ID+"/"+metric, output.Warn,
-						fmt.Sprintf("匹配 %d 个 Pod，但与 cAdvisor 指标没有交集；Kubernetes 资源面板可能无数据", len(pods)))
-				}
-				return c.check("Prometheus", "Pod 归属/"+app.ID+"/"+metric, output.Pass,
-					fmt.Sprintf("匹配 %d 个 Pod，其中 %d 个与 cAdvisor 指标交集匹配", len(pods), matched))
-			},
-		})
+		name += "/" + metric
+		exists, err := c.API.MetricExists(ctx, metric, now.Add(-7*24*time.Hour), now)
+		if err != nil {
+			return c.check("Prometheus", name, output.Fail, requestErrorDetail(err)), nil
+		}
+		if !exists {
+			return c.check("Prometheus", name, output.Fail,
+				"Pod 归属指标 "+metric+" 不存在（近 7 天无序列）。请改用 pod-regex 模式，或在目标 Prometheus 中确认该指标后再配置。"), nil
+		}
+		conditions := []LabelCondition{{Name: "namespace", Value: app.Namespace}}
+		for _, key := range sortedKeys(ps.Matchers) {
+			conditions = append(conditions, LabelCondition{Name: key, Value: ps.Matchers[key]})
+		}
+		selector := NewSelector(conditions...)
+		series, err := c.API.Series(ctx, metric+"{"+selector.String()+"}", now.Add(-lookback), now)
+		if err != nil {
+			return c.check("Prometheus", name, output.Fail, requestErrorDetail(err)), nil
+		}
+		if len(series) == 0 {
+			return c.check("Prometheus", name, output.Fail,
+				fmt.Sprintf("配置的 Pod 标签在近 %s 内没有匹配序列\n\n实际 Selector:\n%s",
+					formatLookback(lookback), selector.String())), nil
+		}
+		for _, key := range sortedKeys(ps.Matchers) {
+			if countLabel(series, key) == 0 {
+				return c.check("Prometheus", name, output.Fail,
+					fmt.Sprintf("匹配序列 %d 条，但没有任何序列带有标签 %s；无法建立可靠的 Pod 归属", len(series), key)), nil
+			}
+		}
+		podCount := countLabel(series, "pod")
+		if podCount == 0 {
+			return c.check("Prometheus", name, output.Fail,
+				fmt.Sprintf("匹配序列 %d 条，但没有任何序列带有 pod 标签；无法建立 Pod 集合", len(series))), nil
+		}
+		pods := labelSet(series, "pod")
+		if podCount < len(series) {
+			return c.check("Prometheus", name, output.Warn,
+				fmt.Sprintf("匹配序列 %d 条，仅 %d 条带有 pod 标签；无法建立完整 Pod 集合，资源面板可能缺数据", len(series), podCount)), pods
+		}
+		cadvisorPods, err := c.cadvisorPods(ctx, app, now, lookback)
+		if err != nil {
+			return c.check("Prometheus", name, output.Fail, requestErrorDetail(err)), pods
+		}
+		matched := 0
+		for pod := range pods {
+			if cadvisorPods[pod] {
+				matched++
+			}
+		}
+		switch {
+		case matched == 0:
+			return c.check("Prometheus", name, output.Fail,
+				fmt.Sprintf("匹配 %d 个 Pod，但与 cAdvisor 指标没有交集；Kubernetes 资源面板无法获得数据。请检查 Namespace 和 Pod 标签是否属于该 Prometheus 集群。", len(pods))), pods
+		case matched < len(pods):
+			return c.check("Prometheus", name, output.Warn,
+				fmt.Sprintf("匹配 %d 个 Pod，其中仅 %d 个与 cAdvisor 指标交集匹配；无法确认 Pod 集合完整性，部分资源面板可能缺数据", len(pods), matched)), pods
+		default:
+			return c.check("Prometheus", name, output.Pass,
+				fmt.Sprintf("匹配 %d 个 Pod，其中 %d 个与 cAdvisor 指标交集匹配", len(pods), matched)), pods
+		}
 	case config.PodSelectorPodRegex:
-		return append(tasks, checkTask{
-			category: "Prometheus",
-			name:     "Pod 归属/" + app.ID,
-			run: func(ctx context.Context) output.Check {
-				if ps.Pod == "" {
-					return c.check("Prometheus", "Pod 归属/"+app.ID, output.Fail, "pod-regex 模式缺少 pod 正则")
-				}
-				selector := `namespace=` + QuoteLabelValue(app.Namespace) + `, pod=~` + QuoteLabelValue(ps.Pod)
-				series, err := c.API.Series(ctx, "container_memory_working_set_bytes{"+selector+"}", now.Add(-lookback), now)
-				if err != nil {
-					return c.check("Prometheus", "Pod 归属/"+app.ID, output.Fail, requestErrorDetail(err))
-				}
-				pods := labelSet(series, "pod")
-				if len(pods) == 0 {
-					return c.check("Prometheus", "Pod 归属/"+app.ID, output.Warn,
-						fmt.Sprintf("Pod 正则在近 %s 内没有匹配到 cAdvisor 序列；Deployment 滚动更新后请确认正则仍覆盖新实例", lookback))
-				}
-				return c.check("Prometheus", "Pod 归属/"+app.ID, output.Warn,
-					fmt.Sprintf("pod-regex 兼容模式匹配 %d 个 Pod；请确保正则覆盖滚动更新后的实例", len(pods)))
-			},
-		})
+		if ps.Pod == "" {
+			return c.check("Prometheus", name, output.Fail, "pod-regex 模式缺少 pod 正则"), nil
+		}
+		selector := NewSelector(
+			LabelCondition{Name: "namespace", Value: app.Namespace},
+			LabelCondition{Name: "pod", Value: ps.Pod, Regex: true},
+		)
+		pods, err := c.cadvisorPodsWithSelector(ctx, selector, now, lookback)
+		if err != nil {
+			return c.check("Prometheus", name, output.Fail, requestErrorDetail(err)), nil
+		}
+		if len(pods) == 0 {
+			return c.check("Prometheus", name, output.Fail,
+				fmt.Sprintf("Pod 正则在近 %s 内没有匹配到 cAdvisor 序列\n\n实际 Selector:\n%s\n\nDeployment 滚动更新后请确认正则仍覆盖新实例。",
+					formatLookback(lookback), selector.String())), nil
+		}
+		return c.check("Prometheus", name, output.Pass,
+			fmt.Sprintf("pod-regex 模式匹配 %d 个 Pod（示例：%s）；Deployment 滚动更新后请确认正则仍覆盖新实例",
+				len(pods), sampleValues(pods, 5))), pods
 	default:
-		return append(tasks, checkTask{
-			category: "Prometheus",
-			name:     "Pod 归属/" + app.ID,
-			run: func(context.Context) output.Check {
-				return c.check("Prometheus", "Pod 归属/"+app.ID, output.Fail, "podSelector.mode 非法")
-			},
-		})
+		return c.check("Prometheus", name, output.Fail, "podSelector.mode 非法"), nil
 	}
+}
+
+// cadvisorPods returns the union of Pods visible in the two cAdvisor metrics
+// that the resource panels depend on. Using a single metric would incorrectly
+// fail ownership when only one of CPU or memory has been scraped.
+func (c *Checker) cadvisorPods(ctx context.Context, app config.Application, now time.Time, lookback time.Duration) (map[string]bool, error) {
+	ps := app.Kubernetes.PodSelector
+	if ps == nil {
+		return map[string]bool{}, nil
+	}
+	var selector Selector
+	if ps.Mode == config.PodSelectorPodRegex && ps.Pod != "" {
+		selector = NewSelector(
+			LabelCondition{Name: "namespace", Value: app.Namespace},
+			LabelCondition{Name: "pod", Value: ps.Pod, Regex: true},
+		)
+	} else {
+		selector = NewSelector(
+			LabelCondition{Name: "namespace", Value: app.Namespace},
+			LabelCondition{Name: "pod", Value: ".+", Regex: true},
+		)
+	}
+	return c.cadvisorPodsWithSelector(ctx, selector, now, lookback)
+}
+
+func (c *Checker) cadvisorPodsWithSelector(ctx context.Context, selector Selector, now time.Time, lookback time.Duration) (map[string]bool, error) {
+	pods := map[string]bool{}
+	var firstErr error
+	for _, metric := range []string{"container_memory_working_set_bytes", "container_cpu_usage_seconds_total"} {
+		series, err := c.API.Series(ctx, metric+"{"+selector.String()+"}", now.Add(-lookback), now)
+		if err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		for pod := range labelSet(series, "pod") {
+			pods[pod] = true
+		}
+	}
+	if len(pods) == 0 && firstErr != nil {
+		return nil, firstErr
+	}
+	return pods, nil
 }
 
 var kubernetesCoverageMetrics = []string{
@@ -382,7 +627,7 @@ var kubernetesCoverageMetrics = []string{
 
 // kubernetesCoverageTasks verifies that each cAdvisor metric actually covers
 // the application's pods and that container matchers do not filter everything.
-func (c *Checker) kubernetesCoverageTasks(app config.Application, now time.Time, lookback time.Duration) []checkTask {
+func (c *Checker) kubernetesCoverageTasks(app config.Application, ownership *podOwnership, now time.Time, lookback time.Duration) []checkTask {
 	if app.Kubernetes.PodSelector == nil {
 		return nil
 	}
@@ -393,7 +638,16 @@ func (c *Checker) kubernetesCoverageTasks(app config.Application, now time.Time,
 		tasks = append(tasks, checkTask{
 			category: "Prometheus",
 			name:     name,
+			gates:    []taskGate{ownership},
 			run: func(ctx context.Context) output.Check {
+				if ownership.status == output.Fail {
+					return c.check("Prometheus", name, output.Skip,
+						"Pod 归属未通过，无法确认应用范围；根因已在 Pod 归属检查中报告，跳过该覆盖检查")
+				}
+				if ownership.status == output.Warn {
+					return c.check("Prometheus", name, output.Warn,
+						"Pod 归属未能完全确认，无法判断资源指标覆盖完整性；根因已在 Pod 归属检查中报告")
+				}
 				exists, err := c.API.MetricExists(ctx, metric, now.Add(-7*24*time.Hour), now)
 				if err != nil {
 					return c.check("Prometheus", name, output.Fail, requestErrorDetail(err))
@@ -402,42 +656,28 @@ func (c *Checker) kubernetesCoverageTasks(app config.Application, now time.Time,
 					return c.check("Prometheus", name, output.Skip,
 						"指标不存在，已在指标检查中报告，无需重复检查应用覆盖")
 				}
-				podRegexMode := app.Kubernetes.PodSelector.Mode == config.PodSelectorPodRegex
-				var pods map[string]bool
-				if !podRegexMode {
-					var err error
-					pods, err = c.appPods(ctx, app, now, lookback)
-					if err != nil {
-						return c.check("Prometheus", name, output.Fail, requestErrorDetail(err))
-					}
-					if len(pods) == 0 {
-						return c.check("Prometheus", name, output.Fail,
-							"未匹配到应用 Pod；请检查 Namespace 和 Pod 标签")
-					}
-				}
-				selector := `namespace=` + QuoteLabelValue(app.Namespace)
-				if podRegexMode {
-					selector += `, pod=~` + QuoteLabelValue(app.Kubernetes.PodSelector.Pod)
-				} else {
-					selector += `, pod=~".+"`
-				}
-				series, err := c.API.Series(ctx, metric+"{"+selector+"}", now.Add(-lookback), now)
+				pods := ownership.pods
+				selector := NewSelector(
+					LabelCondition{Name: "namespace", Value: app.Namespace},
+					LabelCondition{Name: "pod", Value: ".+", Regex: true},
+				)
+				series, err := c.API.Series(ctx, metric+"{"+selector.String()+"}", now.Add(-lookback), now)
 				if err != nil {
 					return c.check("Prometheus", name, output.Fail, requestErrorDetail(err))
 				}
 				appSeries, filtered, risky := 0, 0, 0
-				for _, labelSet := range series {
-					pod := string(labelSet["pod"])
-					if !podRegexMode && !pods[pod] {
+				for _, labels := range series {
+					pod := string(labels["pod"])
+					if !pods[pod] {
 						continue
 					}
 					appSeries++
-					if isRiskyContainer(labelSet) {
+					if isRiskyContainer(labels) {
 						risky++
 					}
 					matched := true
 					for _, matcher := range app.Kubernetes.ContainerMatchers {
-						if !matcherMatches(labelSet, matcher) {
+						if !matcherMatches(labels, matcher) {
 							matched = false
 							break
 						}
@@ -448,12 +688,9 @@ func (c *Checker) kubernetesCoverageTasks(app config.Application, now time.Time,
 				}
 				switch {
 				case appSeries == 0:
-					if podRegexMode {
-						return c.check("Prometheus", name, output.Warn,
-							fmt.Sprintf("Pod 正则在近 %s 内没有匹配到该指标的序列", lookback))
-					}
 					return c.check("Prometheus", name, output.Warn,
-						fmt.Sprintf("应用 Pod 存在，但该指标在近 %s 内没有匹配序列（Pod 数量 %d）", lookback, len(pods)))
+						fmt.Sprintf("应用 Pod 存在，但该指标在近 %s 内没有匹配序列（应用 Pod 数量 %d）",
+							formatLookback(lookback), len(pods)))
 				case len(app.Kubernetes.ContainerMatchers) > 0 && filtered == 0:
 					return c.check("Prometheus", name, output.Fail,
 						fmt.Sprintf("应用 Pod 序列 %d 条，但容器过滤后为 0；过滤条件会隐藏全部应用资源数据", appSeries))
@@ -470,41 +707,20 @@ func (c *Checker) kubernetesCoverageTasks(app config.Application, now time.Time,
 	return tasks
 }
 
-func (c *Checker) appPods(ctx context.Context, app config.Application, now time.Time, lookback time.Duration) (map[string]bool, error) {
-	selector := app.Kubernetes.PodSelector
-	if selector == nil {
-		return nil, nil
-	}
-	var series []model.LabelSet
-	var err error
-	switch selector.Mode {
-	case config.PodSelectorLabels:
-		match := `namespace=` + QuoteLabelValue(app.Namespace)
-		for _, key := range sortedKeys(selector.Matchers) {
-			match += ", " + key + "=" + QuoteLabelValue(selector.Matchers[key])
-		}
-		series, err = c.API.Series(ctx, selector.PodLabelMetric()+"{"+match+"}", now.Add(-lookback), now)
-	case config.PodSelectorPodRegex:
-		match := `namespace=` + QuoteLabelValue(app.Namespace) + `, pod=~` + QuoteLabelValue(selector.Pod)
-		series, err = c.API.Series(ctx, "container_memory_working_set_bytes{"+match+"}", now.Add(-lookback), now)
-	default:
-		return nil, fmt.Errorf("podSelector.mode 非法")
-	}
-	if err != nil {
-		return nil, err
-	}
-	return labelSet(series, "pod"), nil
-}
-
 func isRiskyContainer(labelSet model.LabelSet) bool {
 	value, ok := labelSet["container"]
 	if !ok {
-		return false
+		// cAdvisor parent cgroups and pause containers usually have no
+		// container label at all; both would double count resource usage.
+		return true
 	}
-	return value == "" || value == "POD"
+	if value == "" || value == "POD" {
+		return true
+	}
+	return strings.Contains(strings.ToLower(string(labelSet["image"])), "pause")
 }
 
-func (c *Checker) containerMatcherTasks(app config.Application, now time.Time, lookback time.Duration) []checkTask {
+func (c *Checker) containerMatcherTasks(app config.Application, ownership *podOwnership, now time.Time, lookback time.Duration) []checkTask {
 	if !app.HasMetric("kubernetes") || app.Kubernetes.PodSelector == nil {
 		return nil
 	}
@@ -512,34 +728,53 @@ func (c *Checker) containerMatcherTasks(app config.Application, now time.Time, l
 	return []checkTask{{
 		category: "Prometheus",
 		name:     name,
+		gates:    []taskGate{ownership},
 		run: func(ctx context.Context) output.Check {
-			selector := `namespace=` + QuoteLabelValue(app.Namespace)
-			series, err := c.API.Series(ctx, "container_memory_working_set_bytes{"+selector+"}", now.Add(-lookback), now)
+			if ownership.status == output.Fail {
+				return c.check("Prometheus", name, output.Skip,
+					"Pod 归属未通过，无法确定应用 Pod 集合；根因已在 Pod 归属检查中报告，跳过容器过滤检查")
+			}
+			if ownership.status == output.Warn {
+				return c.check("Prometheus", name, output.Warn,
+					"Pod 归属未能完全确认，容器过滤只能在已确认的 Pod 范围内检查；根因已在 Pod 归属检查中报告")
+			}
+			selector := NewSelector(
+				LabelCondition{Name: "namespace", Value: app.Namespace},
+				LabelCondition{Name: "pod", Value: ".+", Regex: true},
+			)
+			series, err := c.API.Series(ctx, "container_memory_working_set_bytes{"+selector.String()+"}", now.Add(-lookback), now)
 			if err != nil {
 				return c.check("Prometheus", name, output.Fail, requestErrorDetail(err))
 			}
-			if len(series) == 0 {
+			var appSeries []model.LabelSet
+			for _, labels := range series {
+				if ownership.pods[string(labels["pod"])] {
+					appSeries = append(appSeries, labels)
+				}
+			}
+			if len(appSeries) == 0 {
 				return c.check("Prometheus", name, output.Warn,
-					fmt.Sprintf("近 %s 内没有 container_memory_working_set_bytes 序列，无法核对容器过滤条件", lookback))
+					fmt.Sprintf("应用 Pod 在近 %s 内没有 container_memory_working_set_bytes 序列，无法核对容器过滤条件",
+						formatLookback(lookback)))
 			}
 			if len(app.Kubernetes.ContainerMatchers) == 0 {
-				return c.check("Prometheus", name, output.Warn, containerRiskDetail(series))
+				return c.check("Prometheus", name, output.Warn, containerRiskDetail(appSeries))
 			}
 			for _, matcher := range app.Kubernetes.ContainerMatchers {
 				matched := 0
-				for _, labels := range series {
+				for _, labels := range appSeries {
 					if matcherMatches(labels, matcher) {
 						matched++
 					}
 				}
 				if matched == 0 {
 					return c.check("Prometheus", name, output.Fail,
-						fmt.Sprintf("匹配序列 %d 条，但没有序列满足 %s %s %q；容器过滤条件会把应用指标全部过滤为空",
-							len(series), matcher.Name, matcher.EffectiveOperator(), matcher.Value))
+						fmt.Sprintf("应用 Pod 范围内 %d 条序列，没有序列满足 %s %s %q；容器过滤条件会把应用指标全部过滤为空",
+							len(appSeries), matcher.Name, matcher.EffectiveOperator(), matcher.Value))
 				}
 			}
 			matchedAll := 0
-			for _, labels := range series {
+			for _, labels := range appSeries {
 				ok := true
 				for _, matcher := range app.Kubernetes.ContainerMatchers {
 					if !matcherMatches(labels, matcher) {
@@ -553,35 +788,32 @@ func (c *Checker) containerMatcherTasks(app config.Application, now time.Time, l
 			}
 			if matchedAll == 0 {
 				return c.check("Prometheus", name, output.Fail,
-					fmt.Sprintf("单个过滤条件均有匹配，但组合后匹配序列为 0；请检查 operator 组合"))
+					fmt.Sprintf("单个过滤条件均有匹配，但组合后应用 Pod 范围内匹配序列为 0；请检查 operator 组合"))
 			}
 			return c.check("Prometheus", name, output.Pass,
-				fmt.Sprintf("已核对 %d 个过滤条件；Namespace 内 %d 条序列，组合匹配 %d 条",
-					len(app.Kubernetes.ContainerMatchers), len(series), matchedAll))
+				fmt.Sprintf("已核对 %d 个过滤条件；应用 Pod 范围内 %d 条序列，组合匹配 %d 条",
+					len(app.Kubernetes.ContainerMatchers), len(appSeries), matchedAll))
 		},
 	}}
 }
 
 func containerRiskDetail(series []model.LabelSet) string {
 	risky := 0
-	hasContainer := false
+	business := 0
 	for _, labels := range series {
-		value, ok := labels["container"]
-		if !ok {
+		if isRiskyContainer(labels) {
+			risky++
 			continue
 		}
-		hasContainer = true
-		if value == "" || value == "POD" {
-			risky++
-		}
+		business++
 	}
-	if !hasContainer {
-		return "未配置容器过滤条件，且 container_memory_working_set_bytes 没有 container 标签；无法区分业务容器、Pause 容器与 Pod 父级 cgroup，Pod CPU/内存统计可能失真"
+	if business == 0 {
+		return "未配置容器过滤条件，且应用 cAdvisor 序列没有可识别的业务容器标签；无法区分业务容器、Pause 容器与 Pod 父级 cgroup，Pod CPU/内存统计可能失真"
 	}
 	if risky > 0 {
-		return fmt.Sprintf("未配置容器过滤条件；Namespace 内 %d 条序列属于空容器或 POD 基础容器，Pod CPU/内存统计可能重复计入", risky)
+		return fmt.Sprintf("未配置容器过滤条件；应用 Pod 范围内 %d 条序列属于空容器、Pause 容器或 POD 基础容器，Pod CPU/内存统计可能重复计入", risky)
 	}
-	return "未配置容器过滤条件；当前未发现 container=\"\" 或 POD 序列，但仍建议确认后配置 containerMatchers"
+	return "未配置容器过滤条件；当前未发现空容器、Pause 或 POD 基础容器序列，但仍建议确认后配置 containerMatchers"
 }
 
 func matcherMatches(labelSet model.LabelSet, matcher config.LabelMatcher) bool {
@@ -695,6 +927,18 @@ func labelSet(series []model.LabelSet, label string) map[string]bool {
 	return out
 }
 
+func sampleValues(values map[string]bool, limit int) string {
+	items := make([]string, 0, len(values))
+	for value := range values {
+		items = append(items, value)
+	}
+	sort.Strings(items)
+	if len(items) > limit {
+		items = items[:limit]
+	}
+	return strings.Join(items, ", ")
+}
+
 func (c *Checker) componentTasks(now time.Time, lookback time.Duration) []checkTask {
 	var tasks []checkTask
 	for _, component := range c.Site.Spec.Components {
@@ -709,13 +953,15 @@ func (c *Checker) componentTasks(now time.Time, lookback time.Duration) []checkT
 			})
 		}
 		for _, profile := range active {
-			selector := ComponentSelector(component)
+			selector := ComponentSelectorFor(component)
 			required, optional := profileRequirements(profile)
-			tasks = append(tasks, c.metricTasks("组件 "+component.ID, selector, required, optional, now, lookback)...)
+			gate := newProfileGate(required)
+			tasks = append(tasks, c.metricTasks("组件 "+component.ID, selector, required, optional, gate, now, lookback)...)
 			for _, panel := range profile.Panels {
 				tasks = append(tasks, c.queryTask(
 					"组件/"+component.ID+"/"+profile.ID+"/"+panel.ID,
-					RenderCheckQuery(panel.Query, c.Site, selector),
+					RenderCheckQuery(panel.Query, c.Site, selector.String()),
+					[]taskGate{gate}, dependencySkip(gate, lookback),
 				))
 			}
 		}
@@ -768,7 +1014,7 @@ func (c *Checker) skipTasks() []checkTask {
 	return tasks
 }
 
-func (c *Checker) metricTasks(target, selector string, required, optional map[string][]string, now time.Time, lookback time.Duration) []checkTask {
+func (c *Checker) metricTasks(target string, selector Selector, required, optional map[string][]string, gate *profileGate, now time.Time, lookback time.Duration) []checkTask {
 	var tasks []checkTask
 	for _, metric := range sortedKeysOf(required) {
 		metric := metric
@@ -778,30 +1024,40 @@ func (c *Checker) metricTasks(target, selector string, required, optional map[st
 			category: "Prometheus",
 			name:     target + "/" + metric,
 			run: func(ctx context.Context) output.Check {
-				return c.checkMetric(ctx, target, metric, selector, req, opts, now, lookback)
+				check, matched := c.checkMetric(ctx, target, metric, selector, req, opts, now, lookback)
+				if gate != nil {
+					gate.record(metric, matched)
+				}
+				return check
 			},
 		})
 	}
 	return tasks
 }
 
-func (c *Checker) checkMetric(ctx context.Context, target, metric, selector string, required, optional []string, now time.Time, lookback time.Duration) output.Check {
+func (c *Checker) checkMetric(ctx context.Context, target, metric string, selector Selector, required, optional []string, now time.Time, lookback time.Duration) (output.Check, bool) {
+	name := target + "/" + metric
 	exists, err := c.API.MetricExists(ctx, metric, now.Add(-7*24*time.Hour), now)
 	if err != nil {
-		return c.check("Prometheus", target+"/"+metric, output.Fail, requestErrorDetail(err))
+		return c.check("Prometheus", name, output.Fail, requestErrorDetail(err)), false
 	}
 	if !exists {
-		return c.check("Prometheus", target+"/"+metric, output.Fail, "指标不存在（近 7 天无序列）")
+		return c.check("Prometheus", name, output.Fail,
+			"指标不存在（近 7 天无序列）\n\n实际 Selector:\n"+selector.String()), false
 	}
 
-	match := metric + "{" + selector + "}"
+	match := metric + "{" + selector.String() + "}"
 	series, err := c.API.Series(ctx, match, now.Add(-lookback), now)
 	if err != nil {
-		return c.check("Prometheus", target+"/"+metric, output.Fail, requestErrorDetail(err))
+		return c.check("Prometheus", name, output.Fail, requestErrorDetail(err)), false
 	}
 	if len(series) == 0 {
-		return c.check("Prometheus", target+"/"+metric, output.Warn,
-			fmt.Sprintf("指标存在，但 selector 在近 %s 内没有序列", lookback))
+		detail := fmt.Sprintf("指标存在（近 7 天），但最近 %s 内未匹配到序列。\n\n实际 Selector:\n%s",
+			formatLookback(lookback), selector.String())
+		if diagnosis := c.selectorDiagnosis(ctx, metric, selector, now); len(diagnosis) > 0 {
+			detail += "\n\n诊断结果:\n" + numberedLines(diagnosis)
+		}
+		return c.check("Prometheus", name, output.Warn, detail), false
 	}
 	detail := []string{fmt.Sprintf("匹配序列：%d", len(series))}
 	var incomplete []string
@@ -820,22 +1076,109 @@ func (c *Checker) checkMetric(ctx context.Context, target, metric, selector stri
 			missingOptional = append(missingOptional, label)
 		}
 	}
-	summary := strings.Join(detail, "；")
+	summary := strings.Join(detail, "；") + "\n\n实际 Selector:\n" + selector.String()
 	if len(incomplete) > 0 {
-		return c.check("Prometheus", target+"/"+metric, output.Fail,
-			summary+"；原因：必需标签不完整（"+strings.Join(incomplete, ", ")+"），不能把部分标签存在当作全部通过")
+		return c.check("Prometheus", name, output.Fail,
+			summary+"\n\n原因：必需标签不完整（"+strings.Join(incomplete, ", ")+"），不能把部分标签存在当作全部通过"), true
 	}
 	if len(missingOptional) > 0 {
-		return c.check("Prometheus", target+"/"+metric, output.Warn,
-			summary+"；可选标签缺失（"+strings.Join(missingOptional, ", ")+"）")
+		return c.check("Prometheus", name, output.Warn,
+			summary+"\n\n可选标签缺失（"+strings.Join(missingOptional, ", ")+"）"), true
 	}
-	return c.check("Prometheus", target+"/"+metric, output.Pass, summary+"；必需标签齐全")
+	return c.check("Prometheus", name, output.Pass, summary+"\n\n必需标签齐全"), true
 }
 
-func (c *Checker) queryTask(name, query string) checkTask {
+// selectorDiagnosis uses the labels actually returned by Prometheus. It never
+// guesses a label value. Each condition is checked individually so a missing
+// extra label can be distinguished from an empty time window.
+func (c *Checker) selectorDiagnosis(ctx context.Context, metric string, selector Selector, now time.Time) []string {
+	if selector.Empty() {
+		return nil
+	}
+	var lines []string
+	allIndividual := true
+	checked := 0
+	for _, condition := range selector.Conditions {
+		if condition.Regex {
+			continue
+		}
+		values, err := c.labelValueCounts(ctx, metric, condition.Name)
+		if err != nil {
+			lines = append(lines, fmt.Sprintf("无法读取标签 %s 的值: %s", condition.Name, requestErrorDetail(err)))
+			allIndividual = false
+			continue
+		}
+		checked++
+		if values[condition.Value] > 0 {
+			lines = append(lines, fmt.Sprintf("%s=%s：存在", condition.Name, QuoteLabelValue(condition.Value)))
+			continue
+		}
+		allIndividual = false
+		line := fmt.Sprintf("%s=%s：不存在", condition.Name, QuoteLabelValue(condition.Value))
+		if available := availableValues(values, 5); available != "" {
+			line += "；实际存在值: " + available
+		}
+		lines = append(lines, line)
+	}
+	if checked > 0 && allIndividual {
+		series, err := c.API.Series(ctx, metric+"{"+selector.String()+"}", now.Add(-7*24*time.Hour), now)
+		if err != nil {
+			lines = append(lines, "无法核对标签组合: "+requestErrorDetail(err))
+		} else if len(series) == 0 {
+			lines = append(lines, "各标签单独存在，但组合条件在近 7 天没有匹配；额外标签组合或采集范围可能是根因")
+		}
+	}
+	return lines
+}
+
+func (c *Checker) labelValueCounts(ctx context.Context, metric, label string) (map[string]int, error) {
+	value, err := c.API.Query(ctx, fmt.Sprintf("count by (%s) (%s)", label, metric))
+	if err != nil {
+		return nil, err
+	}
+	vector, ok := value.(model.Vector)
+	if !ok {
+		return nil, fmt.Errorf("返回类型不是瞬时向量")
+	}
+	out := map[string]int{}
+	for _, sample := range vector {
+		if value, ok := sample.Metric[model.LabelName(label)]; ok {
+			out[string(value)] += int(sample.Value)
+		}
+	}
+	return out, nil
+}
+
+func availableValues(values map[string]int, limit int) string {
+	items := make([]string, 0, len(values))
+	for value := range values {
+		items = append(items, `"`+value+`"`)
+	}
+	sort.Strings(items)
+	if len(items) > limit {
+		items = items[:limit]
+		items = append(items, "...")
+	}
+	return strings.Join(items, ", ")
+}
+
+func numberedLines(lines []string) string {
+	var b strings.Builder
+	for i, line := range lines {
+		fmt.Fprintf(&b, "%d. %s", i+1, line)
+		if i != len(lines)-1 {
+			b.WriteByte('\n')
+		}
+	}
+	return b.String()
+}
+
+func (c *Checker) queryTask(name, query string, gates []taskGate, skip func() (bool, string)) checkTask {
 	return checkTask{
 		category: "PromQL",
 		name:     name,
+		gates:    gates,
+		skip:     skip,
 		run: func(ctx context.Context) output.Check {
 			value, err := c.API.Query(ctx, query)
 			if err != nil {
@@ -913,6 +1256,24 @@ func isEmptyValue(value model.Value) bool {
 	default:
 		return false
 	}
+}
+
+func formatLookback(lookback time.Duration) string {
+	if lookback <= 0 {
+		return "1h"
+	}
+	if lookback%time.Hour == 0 {
+		return fmt.Sprintf("%dh", int(lookback/time.Hour))
+	}
+	if lookback < time.Hour {
+		return fmt.Sprintf("%dm", int(lookback/time.Minute))
+	}
+	hours := int(lookback / time.Hour)
+	minutes := int((lookback % time.Hour) / time.Minute)
+	if minutes == 0 {
+		return fmt.Sprintf("%dh", hours)
+	}
+	return fmt.Sprintf("%dh%dm", hours, minutes)
 }
 
 func connectivityDetail(err error) string {

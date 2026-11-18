@@ -73,7 +73,7 @@ func Build(site *config.Site, registry *metrics.Registry, links config.Links) (*
 	}
 	b.addDomainPanels()
 	if err := b.addApplicationPanels(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("站点 %s: %w", site.Metadata.ID, err)
 	}
 	b.addComponentPanels()
 	b.addServicePanels()
@@ -98,7 +98,7 @@ func validatePanelQueries(panels []Panel) error {
 	for _, panel := range panels {
 		for _, target := range panel.Targets {
 			if err := metrics.ValidateQuery(target.Expr); err != nil {
-				return fmt.Errorf("面板 %q 的 PromQL 无效: %w", panel.Title, err)
+				return fmt.Errorf("面板 %q 的 PromQL 无效: %w\n原始表达式:\n%s", panel.Title, err, target.Expr)
 			}
 		}
 		if panel.Panels != nil {
@@ -168,14 +168,14 @@ func (b *builder) addApplicationPanels() error {
 					}
 					query, err := metrics.RenderApplicationQuery(panel.Query, entry, false, "")
 					if err != nil {
-						return fmt.Errorf("生成面板 %q: %w", panel.Name, err)
+						return fmt.Errorf("生成面板 %q（入口应用 %s）: %w", panel.Name, appIDs(entry), err)
 					}
 					b.addTemplatePanel(panel, panel.Name, query, nil)
 					continue
 				}
 				query, err := metrics.RenderApplicationQuery(panel.Query, apps, true, metrics.ProfileSelectorVar(profile.ID))
 				if err != nil {
-					return fmt.Errorf("生成面板 %q: %w", panel.Name, err)
+					return fmt.Errorf("生成面板 %q（应用 %s）: %w", panel.Name, appIDs(apps), err)
 				}
 				b.addTemplatePanel(panel, panel.Name, query, nil)
 			case metrics.ScopeNamespace:
@@ -189,7 +189,7 @@ func (b *builder) addApplicationPanels() error {
 				b.addContainerMatcherWarning(k8sApps)
 				query, err := metrics.RenderNamespaceQuery(panel.Query, k8sApps, true, metrics.ProfileSelectorVar(profile.ID))
 				if err != nil {
-					return fmt.Errorf("生成面板 %q: %w", panel.Name, err)
+					return fmt.Errorf("生成面板 %q（应用 %s）: %w", panel.Name, appIDs(k8sApps), err)
 				}
 				b.addTemplatePanel(panel, panel.Name, query, nil)
 			}
@@ -201,7 +201,7 @@ func (b *builder) addApplicationPanels() error {
 			for _, panel := range auto.Panels {
 				query, err := metrics.RenderJobQuery(panel.Query, b.site.Spec.Applications)
 				if err != nil {
-					return fmt.Errorf("生成面板 %q: %w", panel.Name, err)
+					return fmt.Errorf("生成面板 %q（应用 %s）: %w", panel.Name, appIDs(b.site.Spec.Applications), err)
 				}
 				b.addTemplatePanel(panel, panel.Name, query, nil)
 			}
@@ -444,6 +444,14 @@ func panelSize(section, panelType string) (int, int) {
 	default:
 		return 12, 8
 	}
+}
+
+func appIDs(apps []config.Application) string {
+	ids := make([]string, 0, len(apps))
+	for _, app := range apps {
+		ids = append(ids, app.ID)
+	}
+	return strings.Join(ids, ", ")
 }
 
 func contains(items []string, value string) bool {

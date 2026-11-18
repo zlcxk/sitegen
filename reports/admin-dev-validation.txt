@@ -1,0 +1,211 @@
+Site Observability 校验报告
+==========================
+
+站点: 管理后台站点 (admin-dev)
+配置文件: sites/admin.yaml
+模板版本: 1.0.0+e8d6b80be72466ba
+生成时间: 2026-11-18T15:11:35+08:00
+Dashboard: 未生成
+
+检查摘要
+--------
+未发现需要优先处理的根因。
+
+检查结果
+--------
+[PASS] 模板 / 指标模板注册表: 版本 1.0.0，摘要 e8d6b80be72466ba
+[WARN] 配置 / spec.applications[0].kubernetes.podSelector: pod-regex 兼容模式依赖 Pod 名称；Deployment 滚动更新后名称会变化，请确保正则能覆盖新实例
+[WARN] 配置 / spec.applications[1].kubernetes.podSelector: pod-regex 兼容模式依赖 Pod 名称；Deployment 滚动更新后名称会变化，请确保正则能覆盖新实例
+[PASS] Prometheus / 连通性: 查询 API 可访问
+[PASS] Prometheus / 站点 admin/probe_duration_seconds: 匹配序列：1；存在 instance 标签：1；存在 job 标签：1
+       
+       实际 Selector:
+       job="blackbox-sites-dev", instance="https://admin-dev.rtdgo.tech"
+       
+       必需标签齐全
+[PASS] Prometheus / 站点 admin/probe_success: 匹配序列：1；存在 instance 标签：1；存在 job 标签：1
+       
+       实际 Selector:
+       job="blackbox-sites-dev", instance="https://admin-dev.rtdgo.tech"
+       
+       必需标签齐全
+[PASS] PromQL / Blackbox/admin/blackbox-availability: 表达式合法且返回数据
+[PASS] PromQL / Blackbox/admin/blackbox-duration: 表达式合法且返回数据
+[PASS] Prometheus / 应用 rtd-admin-dev/http_server_requests_seconds_bucket: 匹配序列：552；存在 application 标签：552；存在 job 标签：552；存在 method 标签：552；存在 namespace 标签：552；存在 uri 标签：552
+       
+       实际 Selector:
+       application="rtd-admin", namespace="dev", job="rtd-admin"
+       
+       必需标签齐全
+[PASS] Prometheus / 应用 rtd-admin-dev/http_server_requests_seconds_count: 匹配序列：8；存在 application 标签：8；存在 job 标签：8；存在 method 标签：8；存在 namespace 标签：8；存在 status 标签：8；存在 uri 标签：8
+       
+       实际 Selector:
+       application="rtd-admin", namespace="dev", job="rtd-admin"
+       
+       必需标签齐全
+[PASS] Prometheus / 应用 rtd-admin-dev/http_server_requests_seconds_sum: 匹配序列：8；存在 application 标签：8；存在 job 标签：8；存在 namespace 标签：8
+       
+       实际 Selector:
+       application="rtd-admin", namespace="dev", job="rtd-admin"
+       
+       必需标签齐全
+[PASS] PromQL / 应用/rtd-admin-dev/http/http-rps: 表达式合法且返回数据
+[PASS] PromQL / 应用/rtd-admin-dev/http/http-2xx-rate: 表达式合法且返回数据
+[WARN] PromQL / 应用/rtd-admin-dev/http/http-3xx-rate: 查询表达式合法，但当前时间窗口无数据
+[WARN] PromQL / 应用/rtd-admin-dev/http/http-4xx-rate: 查询表达式合法，但当前时间窗口无数据
+[WARN] PromQL / 应用/rtd-admin-dev/http/http-5xx-rate: 查询表达式合法，但当前时间窗口无数据
+[PASS] PromQL / 应用/rtd-admin-dev/http/http-avg-latency: 表达式合法且返回数据
+[PASS] PromQL / 应用/rtd-admin-dev/http/http-p95: 表达式合法且返回数据
+[PASS] PromQL / 应用/rtd-admin-dev/http/http-p99: 表达式合法且返回数据
+[PASS] PromQL / 应用/rtd-admin-dev/http/http-status-codes: 表达式合法且返回数据
+[PASS] PromQL / 应用/rtd-admin-dev/http/http-slow-endpoints: 表达式合法且返回数据
+[PASS] PromQL / 应用/rtd-admin-dev/http/http-top-endpoints: 表达式合法且返回数据
+[PASS] PromQL / 应用/rtd-admin-dev/http/http-rps-by-method: 表达式合法且返回数据
+[PASS] Prometheus / 应用 rtd-admin-dev/jvm_memory_used_bytes: 匹配序列：8；存在 application 标签：8；存在 area 标签：8；存在 job 标签：8；存在 namespace 标签：8；存在 pod 标签：8；可选 id 标签：8
+       
+       实际 Selector:
+       application="rtd-admin", namespace="dev", job="rtd-admin"
+       
+       必需标签齐全
+[PASS] PromQL / 应用/rtd-admin-dev/jvm/jvm-heap-by-pod: 表达式合法且返回数据
+[PASS] PromQL / 应用/rtd-admin-dev/jvm/jvm-heap-by-pool: 表达式合法且返回数据
+[PASS] Prometheus / 应用 rtd-admin-dev/container_cpu_cfs_periods_total: 匹配序列：73；存在 namespace 标签：73；存在 pod 标签：73；可选 container 标签：37
+       
+       实际 Selector:
+       namespace="dev"
+       
+       必需标签齐全
+[PASS] Prometheus / 应用 rtd-admin-dev/container_cpu_cfs_throttled_periods_total: 匹配序列：73；存在 namespace 标签：73；存在 pod 标签：73；可选 container 标签：37
+       
+       实际 Selector:
+       namespace="dev"
+       
+       必需标签齐全
+[PASS] Prometheus / 应用 rtd-admin-dev/container_cpu_usage_seconds_total: 匹配序列：111；存在 namespace 标签：111；存在 pod 标签：111；可选 container 标签：37
+       
+       实际 Selector:
+       namespace="dev"
+       
+       必需标签齐全
+[PASS] Prometheus / 应用 rtd-admin-dev/container_memory_working_set_bytes: 匹配序列：111；存在 namespace 标签：111；存在 pod 标签：111；可选 container 标签：37
+       
+       实际 Selector:
+       namespace="dev"
+       
+       必需标签齐全
+[PASS] Prometheus / 应用 rtd-admin-dev/kube_pod_info: 匹配序列：38；存在 namespace 标签：38；存在 node 标签：38；存在 pod 标签：38
+       
+       实际 Selector:
+       namespace="dev"
+       
+       必需标签齐全
+[PASS] Prometheus / 应用 rtd-admin-dev/kube_pod_status_phase: 匹配序列：185；存在 namespace 标签：185；存在 phase 标签：185；存在 pod 标签：185
+       
+       实际 Selector:
+       namespace="dev"
+       
+       必需标签齐全
+[PASS] Prometheus / Pod 归属/rtd-admin-dev: pod-regex 模式匹配 1 个 Pod（示例：rtd-admin-78b95d8c98-6mkww）；Deployment 滚动更新后请确认正则仍覆盖新实例
+[PASS] PromQL / 应用/rtd-admin-dev/kubernetes/pod-cpu: 表达式合法且返回数据
+[PASS] PromQL / 应用/rtd-admin-dev/kubernetes/pod-memory: 表达式合法且返回数据
+[PASS] PromQL / 应用/rtd-admin-dev/kubernetes/cpu-throttling: 表达式合法且返回数据
+[PASS] PromQL / 应用/rtd-admin-dev/kubernetes/pod-status: 表达式合法且返回数据
+[PASS] PromQL / 应用/rtd-admin-dev/kubernetes/pod-node-distribution: 表达式合法且返回数据
+[PASS] Prometheus / Namespace/dev: Namespace "dev" 存在，kube_pod_info 序列 38 条
+[PASS] Prometheus / Kubernetes 指标/rtd-admin-dev/container_memory_working_set_bytes: 应用 Pod 序列 3 条，容器过滤后 1 条
+[PASS] Prometheus / Kubernetes 指标/rtd-admin-dev/container_cpu_usage_seconds_total: 应用 Pod 序列 3 条，容器过滤后 1 条
+[PASS] Prometheus / Kubernetes 指标/rtd-admin-dev/container_cpu_cfs_throttled_periods_total: 应用 Pod 序列 2 条，容器过滤后 1 条
+[PASS] Prometheus / Kubernetes 指标/rtd-admin-dev/container_cpu_cfs_periods_total: 应用 Pod 序列 2 条，容器过滤后 1 条
+[PASS] Prometheus / 容器过滤/rtd-admin-dev: 已核对 1 个过滤条件；应用 Pod 范围内 3 条序列，组合匹配 1 条
+[PASS] Prometheus / 应用 user-center-application-dev/jvm_memory_used_bytes: 匹配序列：8；存在 application 标签：8；存在 area 标签：8；存在 job 标签：8；存在 namespace 标签：8；存在 pod 标签：8；可选 id 标签：8
+       
+       实际 Selector:
+       application="user-center-application", namespace="dev", job="user-center-application"
+       
+       必需标签齐全
+[PASS] PromQL / 应用/user-center-application-dev/jvm/jvm-heap-by-pod: 表达式合法且返回数据
+[PASS] PromQL / 应用/user-center-application-dev/jvm/jvm-heap-by-pool: 表达式合法且返回数据
+[PASS] Prometheus / 应用 user-center-application-dev/container_cpu_cfs_periods_total: 匹配序列：73；存在 namespace 标签：73；存在 pod 标签：73；可选 container 标签：37
+       
+       实际 Selector:
+       namespace="dev"
+       
+       必需标签齐全
+[PASS] Prometheus / 应用 user-center-application-dev/container_cpu_cfs_throttled_periods_total: 匹配序列：73；存在 namespace 标签：73；存在 pod 标签：73；可选 container 标签：37
+       
+       实际 Selector:
+       namespace="dev"
+       
+       必需标签齐全
+[PASS] Prometheus / 应用 user-center-application-dev/container_cpu_usage_seconds_total: 匹配序列：111；存在 namespace 标签：111；存在 pod 标签：111；可选 container 标签：37
+       
+       实际 Selector:
+       namespace="dev"
+       
+       必需标签齐全
+[PASS] Prometheus / 应用 user-center-application-dev/container_memory_working_set_bytes: 匹配序列：111；存在 namespace 标签：111；存在 pod 标签：111；可选 container 标签：37
+       
+       实际 Selector:
+       namespace="dev"
+       
+       必需标签齐全
+[PASS] Prometheus / 应用 user-center-application-dev/kube_pod_info: 匹配序列：38；存在 namespace 标签：38；存在 node 标签：38；存在 pod 标签：38
+       
+       实际 Selector:
+       namespace="dev"
+       
+       必需标签齐全
+[PASS] Prometheus / 应用 user-center-application-dev/kube_pod_status_phase: 匹配序列：185；存在 namespace 标签：185；存在 phase 标签：185；存在 pod 标签：185
+       
+       实际 Selector:
+       namespace="dev"
+       
+       必需标签齐全
+[PASS] Prometheus / Pod 归属/user-center-application-dev: pod-regex 模式匹配 1 个 Pod（示例：user-center-application-9c8bfdf65-lw7v9）；Deployment 滚动更新后请确认正则仍覆盖新实例
+[PASS] PromQL / 应用/user-center-application-dev/kubernetes/pod-cpu: 表达式合法且返回数据
+[PASS] PromQL / 应用/user-center-application-dev/kubernetes/pod-memory: 表达式合法且返回数据
+[PASS] PromQL / 应用/user-center-application-dev/kubernetes/cpu-throttling: 表达式合法且返回数据
+[PASS] PromQL / 应用/user-center-application-dev/kubernetes/pod-status: 表达式合法且返回数据
+[PASS] PromQL / 应用/user-center-application-dev/kubernetes/pod-node-distribution: 表达式合法且返回数据
+[PASS] Prometheus / Kubernetes 指标/user-center-application-dev/container_memory_working_set_bytes: 应用 Pod 序列 3 条，容器过滤后 1 条
+[PASS] Prometheus / Kubernetes 指标/user-center-application-dev/container_cpu_usage_seconds_total: 应用 Pod 序列 3 条，容器过滤后 1 条
+[PASS] Prometheus / Kubernetes 指标/user-center-application-dev/container_cpu_cfs_throttled_periods_total: 应用 Pod 序列 2 条，容器过滤后 1 条
+[PASS] Prometheus / Kubernetes 指标/user-center-application-dev/container_cpu_cfs_periods_total: 应用 Pod 序列 2 条，容器过滤后 1 条
+[PASS] Prometheus / 容器过滤/user-center-application-dev: 已核对 1 个过滤条件；应用 Pod 范围内 3 条序列，组合匹配 1 条
+[PASS] PromQL / 站点/http/http-entry-rps: 表达式合法且返回数据
+[PASS] PromQL / 站点/http/http-entry-2xx-rate: 表达式合法且返回数据
+[PASS] PromQL / 站点/http/http-entry-p95: 表达式合法且返回数据
+[WARN] PromQL / 站点/http/http-entry-5xx-rate: 查询表达式合法，但当前时间窗口无数据
+[PASS] Prometheus / 应用 rtd-admin-dev/up: 匹配序列：2；存在 job 标签：2
+       
+       实际 Selector:
+       job="rtd-admin"
+       
+       必需标签齐全
+[PASS] Prometheus / 应用 user-center-application-dev/up: 匹配序列：2；存在 job 标签：2
+       
+       实际 Selector:
+       job="user-center-application"
+       
+       必需标签齐全
+[PASS] PromQL / 平台/app-up: 表达式合法且返回数据
+[PASS] Prometheus / 组件 mysql-dev/mysql_up: 匹配序列：1；存在 instance 标签：1；存在 job 标签：1
+       
+       实际 Selector:
+       job="scrapeConfig/monitoring/mysql-exporter-dev", instance="10.10.100.10:3306"
+       
+       必需标签齐全
+[PASS] PromQL / 组件/mysql-dev/mysql-basic/mysql-up: 表达式合法且返回数据
+[PASS] Prometheus / 组件 redis-dev/redis_up: 匹配序列：1；存在 instance 标签：1；存在 job 标签：1
+       
+       实际 Selector:
+       job="scrapeConfig/monitoring/redis-exporter", instance="redis://10.10.100.10:16379"
+       
+       必需标签齐全
+[PASS] PromQL / 组件/redis-dev/redis-basic/redis-up: 表达式合法且返回数据
+[PASS] Dashboard 变量 / jvm_pod: Pod 变量查询合法且返回数据
+[PASS] Dashboard 变量 / k8s_pod: Pod 变量查询合法且返回数据
+[SKIP] 指标模板 / user-center-application-dev/http: 站点未启用该指标模板
+
+汇总: PASS=71 WARN=6 FAIL=0 SKIP=1
+结果: OK

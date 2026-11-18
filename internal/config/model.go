@@ -306,7 +306,8 @@ func Normalize(site *Site) {
 			matcher := &app.Kubernetes.ContainerMatchers[j]
 			matcher.Name = strings.TrimSpace(matcher.Name)
 			matcher.Operator = strings.TrimSpace(matcher.Operator)
-			matcher.Value = strings.TrimSpace(matcher.Value)
+			// The value is intentionally not trimmed: not_equal "" is a
+			// meaningful condition that excludes series without the label.
 			if matcher.Operator == "" {
 				matcher.Operator = MatchEqual
 			}

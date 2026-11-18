@@ -283,6 +283,32 @@ func TestRenderNamespaceQueryUsesContainerMatcherOperators(t *testing.T) {
 	}
 }
 
+func TestContainerMatchersOnlyApplyToCAdvisorMetrics(t *testing.T) {
+	site := selectorSite()
+	app := site.Spec.Applications[0]
+	app.Kubernetes.ContainerMatchers = config.ContainerMatchers{
+		{Name: "container", Operator: config.MatchNotEqual, Value: ""},
+	}
+	containerQuery := renderNamespace(t,
+		"sum by (pod) (rate(container_cpu_usage_seconds_total{%SELECTOR%}[5m]))",
+		[]config.Application{app}, false, "")
+	if !strings.Contains(containerQuery, `container!=""`) {
+		t.Fatalf("cAdvisor query must include container matcher:\n%s", containerQuery)
+	}
+	podStatus := renderNamespace(t,
+		"sum by (pod, phase) (kube_pod_status_phase{%SELECTOR%} == 1)",
+		[]config.Application{app}, false, "")
+	if strings.Contains(podStatus, `container!=""`) {
+		t.Fatalf("kube-state-metrics pod query must not be filtered by container matcher:\n%s", podStatus)
+	}
+	podInfo := renderNamespace(t,
+		"count by (node) (kube_pod_info{%SELECTOR%})",
+		[]config.Application{app}, false, "")
+	if strings.Contains(podInfo, `container!=""`) {
+		t.Fatalf("kube_pod_info must not be filtered by container matcher:\n%s", podInfo)
+	}
+}
+
 func TestRenderJobQueryUsesOnlyJobAndTargetLabels(t *testing.T) {
 	site := selectorSite()
 	app := site.Spec.Applications[0]

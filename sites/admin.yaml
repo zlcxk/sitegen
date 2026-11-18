@@ -1,0 +1,108 @@
+apiVersion: site-observability/v1
+kind: Site
+
+metadata:
+  id: admin-dev
+  name: 管理后台站点
+  environment: dev
+  description: 根据目标 Prometheus 的真实数据验证过的站点配置
+
+spec:
+  domains:
+    - id: admin
+      url: https://admin-dev.rtdgo.tech
+      blackbox:
+        job: blackbox-sites-dev
+        instance: https://admin-dev.rtdgo.tech
+      entryApplications:
+        - rtd-admin-dev
+
+  applications:
+    - id: rtd-admin-dev
+      application: rtd-admin
+      namespace: dev
+
+      prometheus:
+        job: rtd-admin
+        labels:
+          application: rtd-admin
+          namespace: dev
+
+      skywalking:
+        service: rtd-admin_dev
+        endpointFormat: "{method}:{uri}"
+
+      metrics:
+        - http
+        - jvm
+        - kubernetes
+
+      kubernetes:
+        # 目标 Prometheus 中没有 kube_pod_labels（kube-state-metrics 未暴露），
+        # 因此使用经过真实 cAdvisor 数据验证的 Pod 名称正则。
+        podSelector:
+          mode: pod-regex
+          pod: "^rtd-admin-.*$"
+        # 已用真实数据核对：Pod 父级 cgroup 与 pause 容器都没有 container 标签，
+        # 业务容器为 container="main"。container != "" 只保留业务容器。
+        containerMatchers:
+          - name: container
+            operator: not_equal
+            value: ""
+
+      dependencies:
+        - user-center-application-dev
+        - mysql-dev
+        - redis-dev
+
+    - id: user-center-application-dev
+      application: user-center-application
+      namespace: dev
+
+      prometheus:
+        job: user-center-application
+        labels:
+          application: user-center-application
+          namespace: dev
+
+      skywalking:
+        service: user-center-application_dev
+        endpointFormat: "{method}:{uri}"
+
+      # 该应用在当前 Prometheus 中没有 HTTP RED 指标，因此不启用 http，
+      # 避免生成永远无数据的 HTTP 面板。
+      metrics:
+        - jvm
+        - kubernetes
+
+      kubernetes:
+        podSelector:
+          mode: pod-regex
+          pod: "^user-center-application-.*$"
+        containerMatchers:
+          - name: container
+            operator: not_equal
+            value: ""
+
+      dependencies:
+        - mysql-dev
+        - redis-dev
+
+  components:
+    - id: mysql-dev
+      name: MySQL Dev
+      type: mysql
+      prometheus:
+        job: scrapeConfig/monitoring/mysql-exporter-dev
+        instance: "10.10.100.10:3306"
+      metrics:
+        - mysql-basic
+
+    - id: redis-dev
+      name: Redis Dev
+      type: redis
+      prometheus:
+        job: scrapeConfig/monitoring/redis-exporter
+        instance: "redis://10.10.100.10:16379"
+      metrics:
+        - redis-basic

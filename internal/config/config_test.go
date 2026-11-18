@@ -40,6 +40,23 @@ func TestLoadExampleAndValidate(t *testing.T) {
 	}
 }
 
+func TestLoadRejectsInvalidUTF8File(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "bad.yaml")
+	data := []byte("apiVersion: site-observability/v1\nkind: Site\nmetadata:\n  id: bad\n  name: ")
+	data = append(data, 0xff)
+	data = append(data, []byte("\n  environment: test\nspec:\n  domains: []\n")...)
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := config.Load(path)
+	if err == nil {
+		t.Fatal("expected invalid UTF-8 error")
+	}
+	if !strings.Contains(err.Error(), "UTF-8") {
+		t.Fatalf("error does not mention UTF-8: %v", err)
+	}
+}
+
 func TestUnknownFieldGivesPath(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "bad.yaml")
 	data := `apiVersion: site-observability/v1
@@ -304,6 +321,79 @@ func TestContainerMatchersHistoricalMapFormStillLoads(t *testing.T) {
 	}
 }
 
+func TestValidationAllowsNotEqualEmptyContainerMatcher(t *testing.T) {
+	site, reg := loadExample(t)
+	site.Spec.Applications[0].Kubernetes.ContainerMatchers = config.ContainerMatchers{
+		{Name: "image", Operator: config.MatchNotEqual, Value: ""},
+	}
+	if issues := config.Validate(site, reg.Resolve); issues.HasErrors() {
+		t.Fatalf("not_equal \"\" must be accepted: %v", issues.ErrorStrings())
+	}
+}
+
+func TestValidationRejectsEmptyEqualContainerMatcher(t *testing.T) {
+	site, reg := loadExample(t)
+	site.Spec.Applications[0].Kubernetes.ContainerMatchers = config.ContainerMatchers{
+		{Name: "image", Operator: config.MatchEqual, Value: ""},
+	}
+	issues := config.Validate(site, reg.Resolve)
+	if !issues.HasErrors() {
+		t.Fatal("equal \"\" must be rejected")
+	}
+}
+
+func TestValidationRejectsJobAndInstanceContainerMatchers(t *testing.T) {
+	for _, name := range []string{"job", "instance", "namespace", "pod"} {
+		site, reg := loadExample(t)
+		site.Spec.Applications[0].Kubernetes.ContainerMatchers = config.ContainerMatchers{
+			{Name: name, Operator: config.MatchEqual, Value: "rtd-admin"},
+		}
+		issues := config.Validate(site, reg.Resolve)
+		joined := strings.Join(issues.ErrorStrings(), "\n")
+		if !issues.HasErrors() || !strings.Contains(joined, name) {
+			t.Fatalf("container matcher %q must be rejected, got: %s", name, joined)
+		}
+	}
+}
+
+func TestValidationRejectsInvalidUTF8Everywhere(t *testing.T) {
+	invalid := string([]byte{0xff, 0xfe})
+	cases := []struct {
+		name   string
+		mutate func(*config.Site)
+		path   string
+	}{
+		{"application", func(s *config.Site) { s.Spec.Applications[0].Application = invalid }, ".application"},
+		{"namespace", func(s *config.Site) { s.Spec.Applications[0].Namespace = invalid }, ".namespace"},
+		{"job", func(s *config.Site) { s.Spec.Applications[0].Prometheus.Job = invalid }, ".prometheus.job"},
+		{"label value", func(s *config.Site) { s.Spec.Applications[0].Prometheus.Labels["team"] = invalid }, ".prometheus.labels.team"},
+		{"target label", func(s *config.Site) { s.Spec.Applications[0].Prometheus.TargetLabels["cluster"] = invalid }, ".prometheus.targetLabels.cluster"},
+		{"component job", func(s *config.Site) { s.Spec.Components[0].Prometheus.Job = invalid }, "spec.components[0].prometheus.job"},
+		{"component instance", func(s *config.Site) { s.Spec.Components[0].Prometheus.Instance = invalid }, "spec.components[0].prometheus.instance"},
+		{"component label", func(s *config.Site) { s.Spec.Components[0].Prometheus.Labels = map[string]string{"cluster": invalid} }, "spec.components[0].prometheus.labels.cluster"},
+		{"pod regex", func(s *config.Site) {
+			s.Spec.Applications[0].Kubernetes.PodSelector = &config.PodSelector{Mode: config.PodSelectorPodRegex, Pod: invalid}
+		}, ".podSelector.pod"},
+		{"container matcher value", func(s *config.Site) {
+			s.Spec.Applications[0].Kubernetes.ContainerMatchers = config.ContainerMatchers{{Name: "image", Operator: config.MatchNotEqual, Value: invalid}}
+		}, ".containerMatchers[0].value"},
+		{"skywalking service", func(s *config.Site) { s.Spec.Applications[0].Skywalking.Service = invalid }, ".skywalking.service"},
+	}
+	for _, tc := range cases {
+		site, reg := loadExample(t)
+		tc.mutate(site)
+		issues := config.Validate(site, reg.Resolve)
+		joined := strings.Join(issues.ErrorStrings(), "\n")
+		if !issues.HasErrors() || !strings.Contains(joined, "UTF-8") {
+			t.Errorf("%s: expected invalid UTF-8 error, got: %s", tc.name, joined)
+			continue
+		}
+		if !strings.Contains(joined, tc.path) {
+			t.Errorf("%s: expected path %q, got: %s", tc.name, tc.path, joined)
+		}
+	}
+}
+
 func TestContainerMatchersListFormLoads(t *testing.T) {
 	var doc struct {
 		ContainerMatchers config.ContainerMatchers `yaml:"containerMatchers"`
@@ -321,6 +411,17 @@ func TestContainerMatchersListFormLoads(t *testing.T) {
 	}
 	if len(doc.ContainerMatchers) != 2 || doc.ContainerMatchers[0].Operator != config.MatchNotEqual {
 		t.Fatalf("matchers = %#v", doc.ContainerMatchers)
+	}
+}
+
+func TestValidationRequiresComponentJobAndInstance(t *testing.T) {
+	site, reg := loadExample(t)
+	site.Spec.Components[0].Prometheus.Job = ""
+	site.Spec.Components[0].Prometheus.Instance = ""
+	issues := config.Validate(site, reg.Resolve)
+	joined := strings.Join(issues.ErrorStrings(), "\n")
+	if !issues.HasErrors() || !strings.Contains(joined, "prometheus.job") || !strings.Contains(joined, "prometheus.instance") {
+		t.Fatalf("expected component job/instance errors, got: %s", joined)
 	}
 }
 

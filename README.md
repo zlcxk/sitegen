@@ -30,16 +30,19 @@ make build
 ./sitegen create
 
 # 只校验 YAML
-./sitegen validate --site sites/order-admin-test.yaml
+./sitegen validate --site sites/admin.yaml
 
-# 校验 Prometheus 真实指标与 PromQL
-./sitegen check --site sites/order-admin-test.yaml
+# 环境验收：连接 Prometheus 校验指标、Selector、标签、Pod 归属和 PromQL
+./sitegen check --site sites/admin.yaml --lookback 1h
 
-# 仅根据 YAML 生成 Dashboard
-./sitegen generate --site sites/order-admin-test.yaml
+# 普通构建：只做静态校验（YAML、配置语义、PromQL 语法、Dashboard 结构）
+./sitegen build --site sites/admin.yaml
 
-# 完整校验并生成（配置 + Prometheus + Dashboard）
-./sitegen build --site sites/order-admin-test.yaml
+# 严格构建：实时检查失败时阻止构建（用于 CI）
+./sitegen build --site sites/admin.yaml --strict-check
+
+# 仅根据 YAML 生成 Dashboard（不访问 Prometheus）
+./sitegen generate --site sites/admin.yaml
 
 # 批量构建；某个站点失败不会中断其他站点
 ./sitegen build --all
@@ -188,12 +191,13 @@ JSON Schema 位于 [schemas/site.schema.json](schemas/site.schema.json)，可用
 | 命令 | 说明 |
 | --- | --- |
 | `sitegen init` | 初始化目录和工具配置 |
-| `sitegen create` | 交互式创建站点 YAML |
-| `sitegen edit --site ...` | 修改已有站点；可保留或重建各列表 |
-| `sitegen validate --site ...` | 校验 YAML、ID、依赖、模板引用 |
-| `sitegen check --site ...` | 连接 Prometheus 校验指标、标签、Selector、PromQL |
+| `sitegen create` | 交互式创建站点 YAML；支持回退、重新编辑、跳过、草稿恢复 |
+| `sitegen edit --site ...` | 按配置分区编辑已有站点，只修改选中的分区 |
+| `sitegen validate --site ...` | 校验 YAML、ID、依赖、模板引用、UTF-8 |
+| `sitegen check --site ...` | 连接 Prometheus 校验指标、标签、Selector、Pod 归属、PromQL |
 | `sitegen generate --site ...` | 只生成 Dashboard（不访问 Prometheus） |
-| `sitegen build --site ...` | 配置 + Prometheus + Dashboard 完整流程 |
+| `sitegen build --site ...` | 静态校验 + Dashboard 生成；实时检查交给 `check` |
+| `sitegen build --site ... --strict-check` | 严格模式：实时检查失败时阻止构建 |
 | `sitegen list` | 列出 `sites/` 下的站点 |
 | `sitegen version` | 版本与模板摘要 |
 
@@ -209,35 +213,91 @@ JSON Schema 位于 [schemas/site.schema.json](schemas/site.schema.json)，可用
 
 `validate` / `generate` / `build` / `check` 支持 `--site FILE` 或 `--all`，两者互斥。批量处理会继续执行后续站点，最终只要有一个失败就返回非零退出码。
 
-`build` 额外支持：
+`build` 与 `check` 的职责严格分离：
+
+| 检查类型 | 普通 `build` | `build --strict-check` | `check` |
+| --- | --- | --- | --- |
+| YAML 格式 / 必需字段 | 阻止 | 阻止 | 阻止 |
+| PromQL 语法 / 非法 UTF-8 | 阻止 | 阻止 | 阻止 |
+| Dashboard 结构 | 阻止 | 阻止 | 不生成 |
+| 指标近 1h 无数据 | 不阻止 | 阻止 | 报告 WARN/FAIL |
+| 组件暂时无数据 | 不阻止 | 阻止 | 报告 WARN |
+| Pod 归属未配置 | 不阻止，跳过相关面板 | 不阻止，报告风险 | 报告 WARN/FAIL |
+| Pod 归属 FAIL 导致下游无法判断 | 不阻止 | 阻止 | 下游记为 SKIP |
+
+普通 `build` 成功后会明确提示：
+
+```text
+Dashboard 已生成。
+环境数据检查尚未通过，部分面板可能暂时没有数据。
+请执行 sitegen check 进行环境验收。
+```
+
+`check` / `build --strict-check` 额外支持：
 
 ```text
 --prometheus-url URL
 --timeout 15s
 --lookback 1h
 --concurrency 4       # 1-16
---skip-prometheus
 ```
 
-未配置 Prometheus URL 时，`build` 会在报告中标记 `SKIP` 并继续生成；`check` 则会明确失败。需要严格 CI 时请配置 Prometheus 或显式使用 `--skip-prometheus`。
+`--skip-prometheus` 保留为兼容参数；普通 `build` 默认已经不执行实时数据检查。
 
 ### 交互式创建流程
 
-`sitegen create` 依次收集：
+每个配置阶段都显示导航菜单：
 
-1. 站点元数据；
-2. 域名（可多个，至少一个），Blackbox Job / Instance，以及域名的入口应用；
-3. 应用（可多个），兼容同名应用位于不同 Namespace；
-4. 每个应用的 Prometheus Job、额外标签、SkyWalking Service（可自动生成）、Endpoint 格式和指标模板；
-5. 启用 `kubernetes` 的应用继续配置 Pod 归属方式（标签匹配 / Pod 名称正则 / 暂不配置），以及可选的容器过滤条件；
-6. 可选的 `prometheus.targetLabels`（仅用于 `up`）和 SkyWalking UI 下钻配置；
-7. 依赖组件（MySQL / Redis / Kafka / Nacos / 自定义）；
-8. 每个应用的显式依赖关系；
-9. 配置预览和写入确认。
+```text
+[Enter] 继续  [e] 重新编辑当前步骤  [b] 返回上一步  [s] 跳过  [q] 退出并保存草稿
+```
 
-`edit` 会对已有应用逐一询问是否保留 Pod 归属、容器过滤、Target Labels 和 SkyWalking UI 配置；选择不保留时重新收集。
+任何输入处也可以用 `:b` / `:e` / `:s` / `:q` 执行相同操作。返回上一步不会清除后续已经填写的内容；输入不合法时留在当前问题重试。
 
-配置先完整校验，再通过临时文件 + 原子替换写入；覆盖已有文件时保留 `.bak` 备份。用户中断不会写出半成品。
+基础创建只收集生成 Dashboard 所必需的信息：
+
+1. 站点 ID、名称、环境；
+2. 域名 URL、Blackbox Job/Instance（提供默认值）；
+3. 应用 Application、Namespace、Prometheus Job（默认等于 Application）、指标模板；
+4. 启用 `kubernetes` 的应用选择 Pod 归属方式：
+   - Pod 标签匹配：默认 `kube_pod_labels`，连接 Prometheus 时先检查指标是否存在；
+   - Pod 名称正则：连接 Prometheus 时试查询 cAdvisor，展示匹配 Pod 数量和样例；
+   - 暂不配置：跳过应用级 Kubernetes 面板；
+5. 入口应用：单个 HTTP 应用时默认选中并确认，多应用时多选，每个域名独立选择。
+
+以下高级项按阶段询问，默认不启用：Target Labels、Kubernetes 容器过滤、SkyWalking UI 下钻、依赖组件、应用依赖关系。Kubernetes 容器过滤会先展示实际发现的 `container/image/name/id` 标签，并明确提示 `job/instance/namespace/pod` 不能作为容器过滤条件。
+
+### 草稿与恢复
+
+每完成一个阶段自动写入：
+
+```text
+sites/
+  admin.yaml
+  .drafts/
+    admin.yaml.draft
+```
+
+草稿记录下一个待执行阶段。中断后再次执行 `sitegen create` 会询问恢复、重新开始或删除草稿。草稿不参与 Dashboard 生成，也不会覆盖正式 YAML；只有最终预览确认后才原子替换正式文件。
+
+### 分区编辑
+
+`sitegen edit --site sites/admin.yaml` 先显示分区菜单：
+
+```text
+1. 站点基础信息
+2. 域名和入口应用
+3. 应用和指标模板
+4. Kubernetes Pod 归属
+5. Kubernetes 容器过滤
+6. Prometheus Target Labels
+7. SkyWalking 下钻
+8. 依赖组件
+9. 应用依赖关系
+10. 查看完整配置
+```
+
+只进入选中的分区，不重新输入其他分区。编辑完成后展示变更摘要，确认后原子写入并保留 `.bak` 备份；未确认时不修改正式 YAML。
 
 ---
 
@@ -322,13 +382,44 @@ SITEGEN_CONFIG
 | 状态 | 含义 |
 | --- | --- |
 | PASS | 指标、必需标签、Selector、PromQL 正常且有数据 |
-| WARN | 指标存在但当前窗口无序列、可选标签缺失、查询无数据 |
-| FAIL | 指标不存在、必需标签缺失、Selector 无效、PromQL 错误、认证/连接失败 |
-| SKIP | 用户关闭的指标模板，或未配置/显式跳过 Prometheus |
+| WARN | 指标存在但当前窗口无序列、可选标签缺失、查询无数据、Pod 归属不完整 |
+| FAIL | 指标不存在、必需标签缺失、Selector 无效、PromQL 错误、Pod 归属失败、认证/连接失败 |
+| SKIP | 用户关闭的指标模板；上游根因失败导致依赖检查无法判断；显式跳过 Prometheus |
 
 指标存在性通过 `__name__` 标签值检查（近 7 天），序列与标签通过用户可配置的 `--lookback` 窗口检查。无数据不等于配置错误，因此单独归为 WARN。
 
-`build` 在 Prometheus 校验出现 FAIL 时**不会覆盖**已有 Dashboard；原文件保持不变。
+报告会先输出根因摘要，再列出详细检查：
+
+```text
+检查摘要
+--------
+需要处理的主要问题：
+1. Selector 未匹配到数据：应用 rtd-admin-dev
+2. Kubernetes Pod 归属未建立：Pod 归属/rtd-admin
+
+受影响的下游检查：
+- 面板查询（PromQL）：12 项
+- 指标与资源检查：10 项
+```
+
+指标存在但 Selector 无匹配时，报告会输出实际执行的完整 Selector，并用 Prometheus 实际返回的标签值区分“标签不存在”“标签值不存在”“最近 1h 未采集”：
+
+```text
+指标存在（近 7 天），但最近 1h 内未匹配到序列。
+
+实际 Selector:
+application="rtd-admin", namespace="dev", job="rtd-admin", cluster="test-cluster"
+
+诊断结果:
+1. application="rtd-admin"：存在
+2. namespace="dev"：存在
+3. job="rtd-admin"：存在
+4. cluster="test-cluster"：不存在；实际存在值: "test", "prod"
+```
+
+Pod 归属失败后，下游 Kubernetes 覆盖检查和容器过滤检查记为 SKIP，不会重复输出相同 FAIL。HTTP/JVM 基础指标全部无匹配时，下游面板查询同样记为 SKIP；但基础序列匹配成功、单个查询无数据时仍独立报告 WARN。
+
+`check` 在出现 FAIL 时返回非零退出码。`build` 默认不受实时数据影响；`build --strict-check` 在实时检查失败时不会覆盖已有 Dashboard。
 
 ---
 
@@ -382,7 +473,14 @@ SITEGEN_CONFIG
 ```text
 [PASS] 模板 / 指标模板注册表: 版本 1.0.0，摘要 ...
 [PASS] 配置 / Schema 与关联校验: 配置合法
-[WARN] Prometheus / 应用 rtd-admin-test/http_server_requests_seconds_count: 指标存在，但 selector 在近 1h 内没有序列
+[WARN] Prometheus / 应用 rtd-admin-test/http_server_requests_seconds_count: 指标存在（近 7 天），但最近 1h 内未匹配到序列。
+       实际 Selector:
+       application="rtd-admin", namespace="test", job="rtd-admin"
+       诊断结果:
+       1. application="rtd-admin"：存在
+       2. namespace="test"：存在
+       3. job="rtd-admin"：存在
+[SKIP] PromQL / 应用/rtd-admin-test/http/http-p95: 依赖的基础指标在近 1h 内没有匹配序列；根因已在上方指标检查中报告
 [SKIP] 指标模板 / rtd-admin-test/kubernetes: 站点未启用该指标模板
 ```
 
@@ -411,13 +509,17 @@ make generate-example
 - Dashboard 确定性、按 Profile 的应用变量、面板 ID、布局、JSON 校验；
 - Prometheus 客户端认证、401、超时/端点校验；
 - 校验器对缺失指标、无数据、标签缺失、Pod 归属失败、PromQL 错误的分类；
-- CLI 批量失败继续、build 失败保留旧 Dashboard、交互式创建/编辑与 Kubernetes Pod 归属配置流程。
+- CLI 批量失败继续、`build` 与 `check` 分离、严格构建保留旧 Dashboard；
+- 向导回退/重新编辑/跳过/退出草稿、草稿恢复、分区编辑只修改选中分区、输入重试、终端 `:b/:e/:s/:q` 命令；
+- Selector 完整输出、真实标签值诊断、非 UTF-8 字段定位、PromQL 特殊字符转义；
+- Pod 归属成功/失败、下游 SKIP 传播、Pod 正则、应用范围内容器过滤、kube-state-metrics 指标不被容器 Matcher 误过滤；
+- 报告根因摘要与下游依赖计数。
 
 ---
 
 ## 10. 版本与限制
 
-当前为 V1.0.2：
+当前为 V1.0.3：
 
 - 不提供 Web 后台、数据库、告警规则生成或自动发布；
 - 不修改 Prometheus Operator / ServiceMonitor / ScrapeConfig；
@@ -432,6 +534,16 @@ make generate-example
 - Kubernetes 应用级面板要求显式 `kubernetes.podSelector`；无法建立 Pod 归属时跳过面板并输出 WARN，绝不退化为 Namespace 全量查询；
 - 不同环境 cAdvisor/Java 标签结构差异较大，`containerMatchers` 必须根据目标 Prometheus 真实标签确认；
 - Grafana 11.4 / 真实 Prometheus 的导入与查询验证必须在目标环境执行；没有真实 URL 时不能把 `generate` 或 `--skip-prometheus` 视为环境验收通过。
+
+### V1.0.3 迁移提示
+
+- `build` 默认不再执行实时 Prometheus 检查；需要环境验收请执行 `sitegen check`，CI 需要严格阻断时使用 `sitegen build --strict-check`。
+- `containerMatchers` 现在明确禁止 `job`、`instance`、`namespace`、`pod`。应用 Prometheus Job 不等于 cAdvisor Job；容器过滤使用 `container`、`image`、`name`、`id`。
+- `not_equal` 允许空值，例如 `image != ""` 用于排除缺失 image 标签的 Pod 父级 cgroup 序列；`equal`/`regex`/`not_regex` 仍要求非空值。
+- 容器过滤只应用于 `container_*` cAdvisor 指标，不会过滤 `kube_pod_info`、`kube_pod_status_phase` 等 kube-state-metrics 指标。
+- Pod 归属失败后，Kubernetes 覆盖检查和容器过滤检查记为 `SKIP`，不再重复 FAIL。
+- 所有进入 PromQL 的用户字符串都会先做 UTF-8 校验；非法字节会在配置校验阶段定位到具体字段。
+- `sitegen edit` 改为分区编辑，不再逐项询问所有配置；创建流程支持草稿恢复。
 
 ### V1.0.2 配置迁移提示
 

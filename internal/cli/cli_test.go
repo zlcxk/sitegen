@@ -2,13 +2,19 @@ package cli
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/prometheus/common/model"
 
 	"site-observability/internal/config"
 	"site-observability/internal/metrics"
@@ -18,6 +24,7 @@ type mapPrompter struct {
 	out         *bytes.Buffer
 	confirmMap  map[string]bool
 	multiMap    map[string][]int
+	selectMap   map[string]int
 	useDefaults bool
 }
 
@@ -83,6 +90,14 @@ func (p *mapPrompter) Confirm(label string, defaultValue bool) (bool, error) {
 }
 
 func (p *mapPrompter) Select(label string, options []string, defaultIndex int) (int, error) {
+	for key, value := range p.selectMap {
+		if strings.Contains(label, key) {
+			if value < 0 || value >= len(options) {
+				return defaultIndex, nil
+			}
+			return value, nil
+		}
+	}
 	return defaultIndex, nil
 }
 
@@ -322,15 +337,15 @@ func TestBuildWithPrometheus(t *testing.T) {
 	var out, errOut bytes.Buffer
 	code := Execute([]string{
 		"build", "--site", "../../sites/examples/order-admin-test.yaml",
-		"--prometheus-url", server.URL,
+		"--prometheus-url", server.URL, "--strict-check",
 		"--dashboards-dir", filepath.Join(dir, "dashboards"),
 		"--reports-dir", filepath.Join(dir, "reports"),
 	}, strings.NewReader(""), &out, &errOut, "test")
 	if code != 0 {
 		t.Fatalf("exit = %d\nstdout:\n%s\nstderr:\n%s", code, out.String(), errOut.String())
 	}
-	if strings.Contains(out.String(), "[SKIP] Prometheus / 数据校验") {
-		t.Fatalf("Prometheus check was skipped\n%s", out.String())
+	if !strings.Contains(out.String(), "Prometheus") || !strings.Contains(out.String(), "PASS=") {
+		t.Fatalf("expected strict Prometheus check\n%s", out.String())
 	}
 	if strings.Contains(out.String(), "FAIL=") && !strings.Contains(out.String(), "FAIL=0") {
 		t.Fatalf("unexpected Prometheus failures\n%s", out.String())
@@ -338,12 +353,34 @@ func TestBuildWithPrometheus(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, "dashboards", "order-admin-test.json")); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), "PASS=") {
-		t.Fatal("expected pass summary")
+}
+
+func TestBuildIgnoresPrometheusFailureByDefault(t *testing.T) {
+	bad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		fmt.Fprint(w, `{"status":"error","errorType":"internal","error":"boom"}`)
+	}))
+	defer bad.Close()
+	dir := t.TempDir()
+	var out, errOut bytes.Buffer
+	code := Execute([]string{
+		"build", "--site", "../../sites/examples/order-admin-test.yaml",
+		"--prometheus-url", bad.URL,
+		"--dashboards-dir", filepath.Join(dir, "dashboards"),
+		"--reports-dir", filepath.Join(dir, "reports"),
+	}, strings.NewReader(""), &out, &errOut, "test")
+	if code != 0 {
+		t.Fatalf("non-strict build must not fail on environment data\nstdout:\n%s\nstderr:\n%s", out.String(), errOut.String())
+	}
+	if _, err := os.Stat(filepath.Join(dir, "dashboards", "order-admin-test.json")); err != nil {
+		t.Fatalf("dashboard was not generated: %v", err)
+	}
+	if !strings.Contains(out.String(), "sitegen check") {
+		t.Fatalf("build output must direct the user to check\n%s", out.String())
 	}
 }
 
-func TestBuildFailurePreservesPreviousDashboard(t *testing.T) {
+func TestStrictBuildFailurePreservesPreviousDashboard(t *testing.T) {
 	bad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 		fmt.Fprint(w, `{"status":"error","errorType":"internal","error":"boom"}`)
@@ -361,12 +398,12 @@ func TestBuildFailurePreservesPreviousDashboard(t *testing.T) {
 	var out, errOut bytes.Buffer
 	code := Execute([]string{
 		"build", "--site", "../../sites/examples/order-admin-test.yaml",
-		"--prometheus-url", bad.URL,
+		"--prometheus-url", bad.URL, "--strict-check",
 		"--dashboards-dir", filepath.Join(dir, "dashboards"),
 		"--reports-dir", filepath.Join(dir, "reports"),
 	}, strings.NewReader(""), &out, &errOut, "test")
 	if code == 0 {
-		t.Fatal("expected build failure")
+		t.Fatal("expected strict build failure")
 	}
 	after, err := os.ReadFile(dashboardPath)
 	if err != nil {
@@ -374,5 +411,330 @@ func TestBuildFailurePreservesPreviousDashboard(t *testing.T) {
 	}
 	if !bytes.Equal(previous, after) {
 		t.Fatal("failed build overwrote the previous dashboard")
+	}
+}
+
+type fakeProbe struct {
+	metricExists bool
+	series       []model.LabelSet
+}
+
+func (f fakeProbe) MetricExists(context.Context, string, time.Time, time.Time) (bool, error) {
+	return f.metricExists, nil
+}
+
+func (f fakeProbe) Series(context.Context, string, time.Time, time.Time) ([]model.LabelSet, error) {
+	return f.series, nil
+}
+
+func (f fakeProbe) Query(context.Context, string) (model.Value, error) {
+	return model.Vector{}, nil
+}
+
+func TestWizardRejectsMissingPodLabelsMetric(t *testing.T) {
+	p := &navPrompter{
+		mapPrompter: mapPrompter{confirmMap: wizardBaseConfirmMap()},
+		actions: []StepAction{
+			StepNext, // metadata
+			StepNext, // domains
+			StepNext, // applications
+			StepNext, // kubernetes: labels unavailable, choose regex
+			StepNext, // entry applications
+			StepSkip, // target labels
+			StepSkip, // container matchers
+			StepSkip, // skywalking
+			StepSkip, // components
+			StepSkip, // dependencies
+		},
+	}
+	dir := t.TempDir()
+	wizard, _ := newTestWizard(t, p, dir)
+	wizard.Probe = fakeProbe{
+		metricExists: false,
+		series:       []model.LabelSet{{"namespace": "test", "pod": "wizard-app-1", "container": "main"}},
+	}
+	site, err := wizard.Create()
+	if err != nil {
+		t.Fatalf("Create() error = %v\noutput:\n%s", err, wizard.Out)
+	}
+	selector := site.Spec.Applications[0].Kubernetes.PodSelector
+	if selector == nil || selector.Mode != config.PodSelectorPodRegex {
+		t.Fatalf("missing kube_pod_labels must force pod-regex, got %#v", selector)
+	}
+	if !strings.Contains(wizard.Out.(*bytes.Buffer).String(), "不存在") {
+		t.Fatal("wizard must explain that kube_pod_labels does not exist")
+	}
+}
+
+// navPrompter adds a deterministic step-navigation script on top of
+// mapPrompter. It lets tests exercise back/edit/skip/quit without a TTY.
+type navPrompter struct {
+	mapPrompter
+	actions []StepAction
+	used    int
+}
+
+func (p *navPrompter) ChooseStepAction(title string, index, total int, canBack, optional bool) (StepAction, error) {
+	if p.used >= len(p.actions) {
+		return StepNext, nil
+	}
+	action := p.actions[p.used]
+	p.used++
+	return action, nil
+}
+
+func wizardBaseConfirmMap() map[string]bool {
+	return map[string]bool{
+		"继续添加域名":   false,
+		"是否关联应用":   true,
+		"继续添加应用":   false,
+		"继续添加依赖组件": false,
+		"确认写入":     true,
+	}
+}
+
+func newTestWizard(t *testing.T, prompter Prompter, sitesDir string) (*Wizard, *metrics.Registry) {
+	t.Helper()
+	reg, err := metrics.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := &bytes.Buffer{}
+	if mp, ok := prompter.(*navPrompter); ok {
+		mp.out = out
+	}
+	return &Wizard{Prompter: prompter, Registry: reg, Out: out, SitesDir: sitesDir}, reg
+}
+
+func TestWizardBackPreservesLaterData(t *testing.T) {
+	p := &navPrompter{
+		mapPrompter: mapPrompter{confirmMap: wizardBaseConfirmMap()},
+		actions: []StepAction{
+			StepNext, // metadata
+			StepNext, // domains
+			StepNext, // applications
+			StepBack, // return from kubernetes to applications
+			StepNext, // applications: keep existing
+			StepNext, // kubernetes
+			StepNext, // entry applications
+			StepSkip, // target labels
+			StepSkip, // container matchers
+			StepSkip, // skywalking
+			StepSkip, // components
+			StepSkip, // dependencies
+		},
+	}
+	dir := t.TempDir()
+	wizard, reg := newTestWizard(t, p, dir)
+	site, err := wizard.Create()
+	if err != nil {
+		t.Fatalf("Create() error = %v\noutput:\n%s", err, wizard.Out)
+	}
+	if len(site.Spec.Applications) != 1 {
+		t.Fatalf("application was duplicated or lost: %#v", site.Spec.Applications)
+	}
+	if len(site.Spec.Domains) != 1 || len(site.Spec.Applications[0].Dependencies) != 0 {
+		t.Fatal("returning to an earlier stage must preserve later collected data")
+	}
+	if issues := config.Validate(site, reg.Resolve); issues.HasErrors() {
+		t.Fatalf("validation errors: %v", issues.ErrorStrings())
+	}
+}
+
+func TestWizardQuitSavesDraftAndDoesNotWriteSite(t *testing.T) {
+	p := &navPrompter{
+		mapPrompter: mapPrompter{confirmMap: wizardBaseConfirmMap()},
+		actions:     []StepAction{StepNext, StepQuit},
+	}
+	dir := t.TempDir()
+	wizard, _ := newTestWizard(t, p, dir)
+	_, err := wizard.Create()
+	if !errors.Is(err, ErrDraftSaved) {
+		t.Fatalf("Create() error = %v, want ErrDraftSaved", err)
+	}
+	files, err := FindDrafts(dir)
+	if err != nil || len(files) != 1 {
+		t.Fatalf("draft files = %#v, err = %v", files, err)
+	}
+	draft, err := LoadDraft(files[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if draft.Stage != "domains" {
+		t.Errorf("draft stage = %q, want domains", draft.Stage)
+	}
+	if draft.Site.Metadata.ID != "wizard-site" {
+		t.Errorf("draft site ID = %q", draft.Site.Metadata.ID)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "wizard-site.yaml")); !os.IsNotExist(err) {
+		t.Fatal("quit must not write a formal site YAML")
+	}
+}
+
+func TestWizardInterruptionKeepsLastCompletedDraft(t *testing.T) {
+	// Simulate an abrupt interrupt: the reader ends after the metadata stage.
+	// The draft written after metadata must still be recoverable.
+	out := &bytes.Buffer{}
+	input := strings.NewReader("\ninterrupt-site\nInterrupt Site\ntest\n\n")
+	reg, err := metrics.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	wizard := &Wizard{
+		Prompter: NewTerminalPrompter(input, out),
+		Registry: reg,
+		Out:      out,
+		SitesDir: dir,
+	}
+	if _, err := wizard.Create(); !errors.Is(err, ErrCancelled) {
+		t.Fatalf("Create() error = %v, want ErrCancelled", err)
+	}
+	files, err := FindDrafts(dir)
+	if err != nil || len(files) != 1 {
+		t.Fatalf("draft files = %#v, err = %v", files, err)
+	}
+	draft, err := LoadDraft(files[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if draft.Stage != "domains" || draft.Site.Metadata.ID != "interrupt-site" {
+		t.Fatalf("unexpected draft: stage=%q id=%q", draft.Stage, draft.Site.Metadata.ID)
+	}
+}
+
+func TestWizardResumeFromPreviewDraft(t *testing.T) {
+	existing, err := config.Load("../../sites/examples/order-admin-test.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := &mapPrompter{confirmMap: map[string]bool{"确认写入": true}}
+	dir := t.TempDir()
+	wizard, _ := newTestWizard(t, p, dir)
+	wizard.Resume = &Draft{Stage: "preview", Site: existing}
+	site, err := wizard.Create()
+	if err != nil {
+		t.Fatalf("resume Create() error = %v", err)
+	}
+	if site.Metadata.ID != existing.Metadata.ID {
+		t.Fatalf("resumed site ID = %q", site.Metadata.ID)
+	}
+}
+
+func TestTerminalPrompterRetriesInvalidInputAndSupportsBack(t *testing.T) {
+	out := &bytes.Buffer{}
+	p := NewTerminalPrompter(strings.NewReader("BAD ID\ngood-id\n"), out)
+	value, err := p.Input("站点 ID", "", func(value string) error {
+		return config.ValidateSlug(value, 35)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if value != "good-id" {
+		t.Fatalf("value = %q", value)
+	}
+	if !strings.Contains(out.String(), "输入无效") {
+		t.Fatal("invalid input must be reported and re-prompted")
+	}
+
+	p = NewTerminalPrompter(strings.NewReader(":b\n"), out)
+	if _, err := p.Input("任意输入", "", nil); !errors.Is(err, ErrStepBack) {
+		t.Fatalf(":b error = %v, want ErrStepBack", err)
+	}
+}
+
+func TestEditOnlyChangesSelectedPartition(t *testing.T) {
+	reg, err := metrics.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	existing, err := config.Load("../../sites/examples/order-admin-test.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	original := *existing
+	out := &bytes.Buffer{}
+	p := &mapPrompter{
+		out: out,
+		selectMap: map[string]int{
+			"选择要编辑的配置分区": 4, // Kubernetes 容器过滤
+		},
+		confirmMap: map[string]bool{
+			"应用 rtd-admin-test 配置容器过滤规则":   true,
+			"应用 user-center-test 配置容器过滤规则": false,
+			"继续添加容器过滤条件":                   false,
+			"确认写入修改":                       true,
+		},
+	}
+	wizard := &Wizard{Prompter: p, Registry: reg, Out: out}
+	edited, err := wizard.Edit(existing)
+	if err != nil {
+		t.Fatalf("Edit() error = %v\noutput:\n%s", err, out.String())
+	}
+	if len(edited.Spec.Domains) != len(original.Spec.Domains) ||
+		!reflect.DeepEqual(edited.Spec.Domains[0], original.Spec.Domains[0]) {
+		t.Fatal("editing container matchers changed domain configuration")
+	}
+	if len(edited.Spec.Applications) != len(original.Spec.Applications) {
+		t.Fatal("editing container matchers changed the application count")
+	}
+	if len(edited.Spec.Applications[0].Dependencies) != len(original.Spec.Applications[0].Dependencies) {
+		t.Fatal("editing container matchers changed dependencies")
+	}
+	matchers := edited.Spec.Applications[0].Kubernetes.ContainerMatchers
+	if len(matchers) != 1 || matchers[0].Name != "container" || matchers[0].Value != "app" {
+		t.Fatalf("container matchers = %#v", matchers)
+	}
+	if len(edited.Spec.Applications[1].Kubernetes.ContainerMatchers) != 0 {
+		t.Fatal("application the user declined must not be modified")
+	}
+}
+
+func TestEditEntryApplicationsDoesNotRepromptDomainFields(t *testing.T) {
+	reg, err := metrics.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	existing, err := config.Load("../../sites/examples/order-admin-test.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Give the second application HTTP so there are two selectable entry apps.
+	for i := range existing.Spec.Applications {
+		if existing.Spec.Applications[i].ID == "user-center-test" {
+			existing.Spec.Applications[i].Metrics = append(existing.Spec.Applications[i].Metrics, "http")
+		}
+	}
+	originalURL := existing.Spec.Domains[0].URL
+	originalBlackbox := existing.Spec.Domains[0].Blackbox
+	out := &bytes.Buffer{}
+	p := &mapPrompter{
+		out: out,
+		selectMap: map[string]int{
+			"选择要编辑的配置分区": 1, // 域名和入口应用
+			"域名配置":       0, // 保留现有域名
+		},
+		multiMap: map[string][]int{
+			"的入口应用": {1},
+		},
+		confirmMap: map[string]bool{"确认写入修改": true},
+	}
+	wizard := &Wizard{Prompter: p, Registry: reg, Out: out}
+	edited, err := wizard.Edit(existing)
+	if err != nil {
+		t.Fatalf("Edit() error = %v\noutput:\n%s", err, out.String())
+	}
+	if edited.Spec.Domains[0].URL != originalURL || edited.Spec.Domains[0].Blackbox != originalBlackbox {
+		t.Fatal("changing entry applications must not rewrite domain fields")
+	}
+	if len(edited.Spec.Domains[0].EntryApplications) != 1 ||
+		edited.Spec.Domains[0].EntryApplications[0] != "user-center-test" {
+		t.Fatalf("entry applications = %#v", edited.Spec.Domains[0].EntryApplications)
+	}
+	if len(edited.Spec.Applications) != len(existing.Spec.Applications) {
+		t.Fatal("changing entry applications must not modify applications")
+	}
+	if !strings.Contains(out.String(), "变更摘要") {
+		t.Fatal("edit must print a change summary")
 	}
 }

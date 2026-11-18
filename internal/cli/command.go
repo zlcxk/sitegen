@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"sort"
 	"strconv"
@@ -47,11 +48,14 @@ type siteAction struct {
 	requireProm  bool
 	skipProm     bool
 	skipReason   string
-	dashboardDir string
-	reportDir    string
-	links        config.Links
-	lookback     time.Duration
-	concurrency  int
+	// deferEnvironmentCheck prints the "dashboard generated, run check next"
+	// notice for a non-strict build.
+	deferEnvironmentCheck bool
+	dashboardDir          string
+	reportDir             string
+	links                 config.Links
+	lookback              time.Duration
+	concurrency           int
 }
 
 // Execute runs the CLI and returns a process exit code.
@@ -68,6 +72,9 @@ func Execute(args []string, in io.Reader, out, errOut io.Writer, version string)
 	if err := root.ExecuteContext(context.Background()); err != nil {
 		if errors.Is(err, ErrCancelled) {
 			fmt.Fprintln(out, "已取消，未写入文件。")
+			return 0
+		}
+		if errors.Is(err, ErrDraftSaved) {
 			return 0
 		}
 		fmt.Fprintf(errOut, "错误: %v\n", err)
@@ -159,10 +166,10 @@ links:
 }
 
 func (a *app) createCommand(opts *rootOptions) *cobra.Command {
-	var outputPath string
+	var outputPath, promURL, timeoutRaw string
 	cmd := &cobra.Command{
 		Use:   "create",
-		Short: "交互式创建站点配置",
+		Short: "交互式创建站点配置（支持草稿恢复和步骤回退）",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			reg, err := metrics.LoadDefault()
@@ -170,7 +177,18 @@ func (a *app) createCommand(opts *rootOptions) *cobra.Command {
 				return err
 			}
 			prompter := NewTerminalPrompter(a.in, a.out)
-			wizard := &Wizard{Prompter: prompter, Registry: reg, Out: a.out}
+			resume, oldDraft, err := a.chooseDraft(prompter, opts.sitesDir)
+			if err != nil {
+				return err
+			}
+			wizard := &Wizard{
+				Prompter: prompter,
+				Registry: reg,
+				Out:      a.out,
+				Probe:    a.bestEffortProbe(opts.configPath, promURL, timeoutRaw),
+				SitesDir: opts.sitesDir,
+				Resume:   resume,
+			}
 			site, err := wizard.Create()
 			if err != nil {
 				return err
@@ -190,20 +208,25 @@ func (a *app) createCommand(opts *rootOptions) *cobra.Command {
 			if err := config.Write(outputPath, site, true); err != nil {
 				return err
 			}
+			_ = DeleteDraft(oldDraft)
+			_ = DeleteDraft(DraftPath(opts.sitesDir, site.Metadata.ID))
 			fmt.Fprintf(a.out, "\n已写入站点配置: %s\n", outputPath)
 			fmt.Fprintf(a.out, "下一步: sitegen build --site %s\n", outputPath)
+			fmt.Fprintf(a.out, "环境验收: sitegen check --site %s\n", outputPath)
 			return nil
 		},
 	}
 	cmd.Flags().StringVarP(&outputPath, "output", "o", "", "输出文件路径（默认 sites/<site-id>.yaml）")
+	cmd.Flags().StringVar(&promURL, "prometheus-url", "", "用于向导中试查询 Pod/容器标签的 Prometheus URL")
+	cmd.Flags().StringVar(&timeoutRaw, "timeout", "", "Prometheus 请求超时（如 15s）")
 	return cmd
 }
 
 func (a *app) editCommand(opts *rootOptions) *cobra.Command {
-	var sitePath string
+	var sitePath, promURL, timeoutRaw string
 	cmd := &cobra.Command{
 		Use:   "edit",
-		Short: "修改已有站点配置",
+		Short: "按分区修改已有站点配置",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if sitePath == "" {
@@ -218,10 +241,23 @@ func (a *app) editCommand(opts *rootOptions) *cobra.Command {
 				return err
 			}
 			prompter := NewTerminalPrompter(a.in, a.out)
-			wizard := &Wizard{Prompter: prompter, Registry: reg, Out: a.out}
+			wizard := &Wizard{
+				Prompter: prompter,
+				Registry: reg,
+				Out:      a.out,
+				Probe:    a.bestEffortProbe(opts.configPath, promURL, timeoutRaw),
+			}
 			edited, err := wizard.Edit(site)
 			if err != nil {
+				if errors.Is(err, ErrViewOnly) {
+					fmt.Fprintln(a.out, "仅查看配置，未修改文件。")
+					return nil
+				}
 				return err
+			}
+			if reflect.DeepEqual(site, edited) {
+				fmt.Fprintln(a.out, "未检测到变更，未写入文件。")
+				return nil
 			}
 			if err := config.Write(sitePath, edited, true); err != nil {
 				return err
@@ -231,7 +267,70 @@ func (a *app) editCommand(opts *rootOptions) *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&sitePath, "site", "", "站点 YAML 文件")
+	cmd.Flags().StringVar(&promURL, "prometheus-url", "", "用于向导中试查询 Pod/容器标签的 Prometheus URL")
+	cmd.Flags().StringVar(&timeoutRaw, "timeout", "", "Prometheus 请求超时（如 15s）")
 	return cmd
+}
+
+// chooseDraft lists unfinished create drafts and lets the user resume, restart
+// or delete them. It never applies a draft to a formal YAML file by itself.
+func (a *app) chooseDraft(prompter Prompter, sitesDir string) (*Draft, string, error) {
+	files, err := FindDrafts(sitesDir)
+	if err != nil {
+		return nil, "", err
+	}
+	if len(files) == 0 {
+		return nil, "", nil
+	}
+	options := make([]string, 0, len(files)+2)
+	for _, file := range files {
+		label := file
+		if draft, err := LoadDraft(file); err == nil {
+			label = fmt.Sprintf("%s（站点 %s，阶段 %s）", filepath.Base(file), draft.Site.Metadata.ID, draft.Stage)
+		}
+		options = append(options, label)
+	}
+	options = append(options, "重新开始（保留草稿）", "删除全部草稿并重新开始")
+	index, err := prompter.Select("检测到未完成的创建草稿", options, 0)
+	if err != nil {
+		return nil, "", err
+	}
+	switch index {
+	case len(files):
+		return nil, "", nil
+	case len(files) + 1:
+		for _, file := range files {
+			_ = DeleteDraft(file)
+		}
+		return nil, "", nil
+	default:
+		draft, err := LoadDraft(files[index])
+		if err != nil {
+			fmt.Fprintf(a.errOut, "草稿 %s 无法恢复: %v\n将重新开始，草稿文件保留在原处。\n", files[index], err)
+			return nil, "", nil
+		}
+		fmt.Fprintf(a.out, "恢复草稿: %s（阶段 %s）\n", files[index], draft.Stage)
+		return draft, files[index], nil
+	}
+}
+
+// bestEffortProbe builds an optional Prometheus client for wizard-time
+// discovery. Failures are reported as hints, never as wizard failures.
+func (a *app) bestEffortProbe(configPath, promURL, timeoutRaw string) ClusterProbe {
+	tool, _, err := config.LoadToolConfig(configPath)
+	if err != nil {
+		return nil
+	}
+	promCfg, available, err := resolvePromConfig(promURL, timeoutRaw, tool)
+	if err != nil || !available {
+		return nil
+	}
+	client, err := discovery.NewClient(promCfg)
+	if err != nil {
+		fmt.Fprintf(a.errOut, "提示: 无法创建向导用 Prometheus 客户端: %v\n", err)
+		return nil
+	}
+	return client
 }
 
 func (a *app) validateCommand(opts *rootOptions) *cobra.Command {
@@ -357,14 +456,16 @@ func (a *app) generateCommand(opts *rootOptions) *cobra.Command {
 
 func (a *app) buildCommand(opts *rootOptions) *cobra.Command {
 	var sitePath string
-	var all, skipProm bool
+	var all, skipProm, strictCheck bool
 	var promURL, timeoutRaw string
 	var lookback time.Duration
 	var concurrency int
 	cmd := &cobra.Command{
 		Use:   "build",
-		Short: "完整校验并生成 Dashboard",
-		Args:  cobra.NoArgs,
+		Short: "静态校验并生成 Dashboard（实时数据用 check 验收）",
+		Long: "build 只做 YAML 结构、配置语义、PromQL 语法和 Dashboard 结构校验，然后生成 Dashboard JSON。" +
+			"Prometheus 实时数据问题不会阻止普通构建；显式使用 --strict-check 时才会把环境校验失败视为构建失败。",
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			files, err := selectSites(sitePath, all, opts.sitesDir)
 			if err != nil {
@@ -374,7 +475,10 @@ func (a *app) buildCommand(opts *rootOptions) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			tool, err := a.loadToolConfig(opts.configPath, !skipProm)
+			if skipProm {
+				strictCheck = false
+			}
+			tool, err := a.loadToolConfig(opts.configPath, false)
 			if err != nil {
 				return err
 			}
@@ -382,18 +486,18 @@ func (a *app) buildCommand(opts *rootOptions) *cobra.Command {
 				return err
 			}
 			action := siteAction{
-				generate:     true,
-				checkProm:    true,
-				skipProm:     skipProm,
-				skipReason:   "用户通过 --skip-prometheus 跳过",
-				reportDir:    opts.reportsDir,
-				dashboardDir: opts.dashboardsDir,
-				links:        tool.Links,
-				lookback:     lookback,
-				concurrency:  concurrency,
+				generate:              true,
+				checkProm:             strictCheck,
+				requireProm:           strictCheck,
+				deferEnvironmentCheck: !strictCheck,
+				reportDir:             opts.reportsDir,
+				dashboardDir:          opts.dashboardsDir,
+				links:                 tool.Links,
+				lookback:              lookback,
+				concurrency:           concurrency,
 			}
 			var client *discovery.Client
-			if !skipProm {
+			if strictCheck {
 				promCfg, available, err := resolvePromConfig(promURL, timeoutRaw, tool)
 				if err != nil {
 					return err
@@ -404,7 +508,7 @@ func (a *app) buildCommand(opts *rootOptions) *cobra.Command {
 						return err
 					}
 				} else {
-					action.skipReason = "未配置 Prometheus URL"
+					action.skipReason = "严格检查需要 Prometheus URL（--prometheus-url 或 SITEGEN_PROMETHEUS_URL）"
 				}
 			}
 			return a.processFiles(cmd.Context(), files, reg, client, action)
@@ -414,9 +518,10 @@ func (a *app) buildCommand(opts *rootOptions) *cobra.Command {
 	cmd.Flags().BoolVar(&all, "all", false, "处理目录下所有站点")
 	cmd.Flags().StringVar(&promURL, "prometheus-url", "", "Prometheus URL（覆盖环境变量和配置文件）")
 	cmd.Flags().StringVar(&timeoutRaw, "timeout", "", "Prometheus 请求超时（如 15s）")
-	cmd.Flags().DurationVar(&lookback, "lookback", time.Hour, "校验时间窗口")
+	cmd.Flags().DurationVar(&lookback, "lookback", time.Hour, "严格检查的时间窗口")
 	cmd.Flags().IntVar(&concurrency, "concurrency", 4, "Prometheus 查询并发度（1-16）")
-	cmd.Flags().BoolVar(&skipProm, "skip-prometheus", false, "跳过 Prometheus 数据检查并生成")
+	cmd.Flags().BoolVar(&strictCheck, "strict-check", false, "执行实时 Prometheus 检查，并以失败结果阻止构建")
+	cmd.Flags().BoolVar(&skipProm, "skip-prometheus", false, "兼容旧参数；build 默认已不执行实时数据检查")
 	return cmd
 }
 
@@ -584,6 +689,11 @@ func (a *app) processSite(ctx context.Context, path string, reg *metrics.Registr
 		report.DashboardPath = dashboardPath
 		report.Add("Dashboard", "结构校验与原子写入", output.Pass, "已写入 "+dashboardPath)
 	}
+	if action.deferEnvironmentCheck {
+		report.DeferredEnvironmentCheck = true
+		report.Add("环境验收", "实时数据检查", output.Skip,
+			"普通 build 不阻止因流量或采集就绪状态导致的无数据；请运行 sitegen check 完成环境验收")
+	}
 
 	if err := report.WriteText(reportPath); err != nil {
 		return report, fmt.Errorf("写入校验报告 %s: %w", reportPath, err)
@@ -601,13 +711,22 @@ func (a *app) failWithReport(report *output.Report, reportPath string, cause err
 }
 
 func (a *app) printReport(report *output.Report, reportPath string) {
+	for _, line := range report.SummaryLines() {
+		fmt.Fprintln(a.out, line)
+	}
 	for _, check := range report.Checks {
-		if check.Status == output.Warn || check.Status == output.Fail {
-			detail := ""
-			if check.Detail != "" {
-				detail = ": " + check.Detail
-			}
-			fmt.Fprintf(a.out, "[%s] %s / %s%s\n", check.Status, check.Category, check.Name, detail)
+		if check.Status != output.Warn && check.Status != output.Fail {
+			continue
+		}
+		detail := strings.TrimSpace(check.Detail)
+		if detail == "" {
+			fmt.Fprintf(a.out, "[%s] %s / %s\n", check.Status, check.Category, check.Name)
+			continue
+		}
+		lines := strings.Split(detail, "\n")
+		fmt.Fprintf(a.out, "[%s] %s / %s: %s\n", check.Status, check.Category, check.Name, lines[0])
+		for _, line := range lines[1:] {
+			fmt.Fprintf(a.out, "       %s\n", line)
 		}
 	}
 	fmt.Fprintf(a.out, "%s\n", report.SummaryLine())
@@ -615,6 +734,11 @@ func (a *app) printReport(report *output.Report, reportPath string) {
 		fmt.Fprintf(a.out, "Dashboard: %s\n", report.DashboardPath)
 	}
 	fmt.Fprintf(a.out, "报告: %s\n", reportPath)
+	if report.DashboardPath != "" && report.DeferredEnvironmentCheck {
+		fmt.Fprintln(a.out, "Dashboard 已生成。")
+		fmt.Fprintln(a.out, "环境数据检查尚未通过，部分面板可能暂时没有数据。")
+		fmt.Fprintln(a.out, "请执行 sitegen check 进行环境验收。")
+	}
 }
 
 func (a *app) reportPath(site *config.Site, reportsDir string) string {

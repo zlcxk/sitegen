@@ -381,7 +381,7 @@ func cloneCallForApp(call *parser.Call, app config.Application, scope queryScope
 }
 
 func buildVectorSelector(original *parser.VectorSelector, app config.Application, scope queryScope) (*parser.VectorSelector, error) {
-	matchers, err := appMatchers(original.LabelMatchers, app, scope)
+	matchers, err := appMatchers(original.Name, original.LabelMatchers, app, scope)
 	if err != nil {
 		return nil, err
 	}
@@ -392,7 +392,7 @@ func buildVectorSelector(original *parser.VectorSelector, app config.Application
 	return &cloned, nil
 }
 
-func appMatchers(original []*labels.Matcher, app config.Application, scope queryScope) ([]*labels.Matcher, error) {
+func appMatchers(metricName string, original []*labels.Matcher, app config.Application, scope queryScope) ([]*labels.Matcher, error) {
 	out := make([]*labels.Matcher, 0, len(original)+8)
 	for _, matcher := range original {
 		if matcher.Name == selectorPlaceholderName && matcher.Value == selectorPlaceholderValue {
@@ -454,12 +454,18 @@ func appMatchers(original []*labels.Matcher, app config.Application, scope query
 			}
 			out = append(out, regexMatcher)
 		}
-		for _, matcher := range app.Kubernetes.ContainerMatchers {
-			created, err := containerMatcher(matcher)
-			if err != nil {
-				return nil, err
+		// Container matchers only filter cAdvisor container series. Applying
+		// them to kube-state-metrics pod-level metrics (kube_pod_info,
+		// kube_pod_status_phase, ...) would silently remove every series on
+		// clusters where those metrics do not carry a container label.
+		if isContainerMetric(metricName) {
+			for _, matcher := range app.Kubernetes.ContainerMatchers {
+				created, err := containerMatcher(matcher)
+				if err != nil {
+					return nil, err
+				}
+				out = append(out, created)
 			}
-			out = append(out, created)
 		}
 	case scopeJob:
 		if app.Prometheus.Job != "" {
@@ -476,6 +482,13 @@ func appMatchers(original []*labels.Matcher, app config.Application, scope query
 		return nil, fmt.Errorf("未知的查询范围")
 	}
 	return out, nil
+}
+
+// isContainerMetric reports whether a metric is a cAdvisor container series.
+// Container matchers are only meaningful for these metrics; kube-state-metrics
+// pod-level series must never be filtered by container/image labels.
+func isContainerMetric(name string) bool {
+	return strings.HasPrefix(name, "container_")
 }
 
 func containerMatcher(matcher config.LabelMatcher) (*labels.Matcher, error) {

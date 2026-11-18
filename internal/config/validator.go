@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"unicode/utf8"
 )
 
 type Severity string
@@ -139,9 +140,13 @@ func Validate(site *Site, resolve Resolver) Issues {
 		}
 		if d.Blackbox.Job == "" {
 			add(SeverityError, base+".blackbox.job", "不能为空")
+		} else if err := validateUTF8(d.Blackbox.Job); err != nil {
+			add(SeverityError, base+".blackbox.job", "%v", err)
 		}
 		if d.Blackbox.Instance == "" {
 			add(SeverityError, base+".blackbox.instance", "不能为空")
+		} else if err := validateUTF8(d.Blackbox.Instance); err != nil {
+			add(SeverityError, base+".blackbox.instance", "%v", err)
 		}
 		seenEntry := map[string]bool{}
 		for j, entryID := range d.EntryApplications {
@@ -196,11 +201,15 @@ func Validate(site *Site, resolve Resolver) Issues {
 		registerID(app.ID, base+".id")
 		if app.Application == "" {
 			add(SeverityError, base+".application", "不能为空")
+		} else if err := validateUTF8(app.Application); err != nil {
+			add(SeverityError, base+".application", "%v", err)
 		} else if err := validateVariableLabelValue(app.Application); err != nil {
 			add(SeverityError, base+".application", "%v", err)
 		}
 		if app.Namespace == "" {
 			add(SeverityError, base+".namespace", "不能为空")
+		} else if err := validateUTF8(app.Namespace); err != nil {
+			add(SeverityError, base+".namespace", "%v", err)
 		} else if err := validateVariableLabelValue(app.Namespace); err != nil {
 			add(SeverityError, base+".namespace", "%v", err)
 		}
@@ -214,6 +223,8 @@ func Validate(site *Site, resolve Resolver) Issues {
 		}
 		if app.Prometheus.Job == "" {
 			add(SeverityError, base+".prometheus.job", "不能为空")
+		} else if err := validateUTF8(app.Prometheus.Job); err != nil {
+			add(SeverityError, base+".prometheus.job", "%v", err)
 		}
 		if app.Prometheus.Labels != nil {
 			if v, ok := app.Prometheus.Labels["application"]; ok && v != app.Application {
@@ -229,6 +240,8 @@ func Validate(site *Site, resolve Resolver) Issues {
 		validateApplicationKubernetes(app, base+".kubernetes", add)
 		if app.Skywalking.Service == "" {
 			add(SeverityError, base+".skywalking.service", "不能为空；留空时会自动生成 {application}_{namespace}")
+		} else if err := validateUTF8(app.Skywalking.Service); err != nil {
+			add(SeverityError, base+".skywalking.service", "%v", err)
 		} else if first, ok := services[app.Skywalking.Service]; ok {
 			add(SeverityError, base+".skywalking.service", "SkyWalking Service %q 已映射到 %s；不允许重复映射", app.Skywalking.Service, first)
 		} else {
@@ -299,9 +312,13 @@ func Validate(site *Site, resolve Resolver) Issues {
 		}
 		if component.Prometheus.Job == "" {
 			add(SeverityError, base+".prometheus.job", "不能为空")
+		} else if err := validateUTF8(component.Prometheus.Job); err != nil {
+			add(SeverityError, base+".prometheus.job", "%v", err)
 		}
 		if component.Prometheus.Instance == "" {
 			add(SeverityError, base+".prometheus.instance", "不能为空")
+		} else if err := validateUTF8(component.Prometheus.Instance); err != nil {
+			add(SeverityError, base+".prometheus.instance", "%v", err)
 		}
 		validateExtraLabels(component.Prometheus.Labels, base+".prometheus.labels", add)
 		selectorKey := component.Type + "\x00" + component.Prometheus.Job + "\x00" + component.Prometheus.Instance
@@ -359,6 +376,17 @@ func validateVariableLabelValue(value string) error {
 	return nil
 }
 
+// validateUTF8 rejects strings that cannot be encoded into a PromQL label
+// value. UTF-8 validity is checked before any query is generated so the error
+// points at the configuration field instead of surfacing as a Prometheus API
+// parse failure.
+func validateUTF8(value string) error {
+	if !utf8.ValidString(value) {
+		return fmt.Errorf("包含非法 UTF-8 字节，无法安全生成 PromQL；请重新填写该字段")
+	}
+	return nil
+}
+
 func validateExtraLabels(labels map[string]string, path string, add func(Severity, string, string, ...any)) {
 	for _, key := range sortedMapKeys(labels) {
 		value := labels[key]
@@ -374,6 +402,8 @@ func validateExtraLabels(labels map[string]string, path string, add func(Severit
 		}
 		if value == "" {
 			add(SeverityError, labelPath, "标签值不能为空")
+		} else if err := validateUTF8(value); err != nil {
+			add(SeverityError, labelPath, "%v", err)
 		}
 	}
 }
@@ -418,11 +448,15 @@ func validateApplicationKubernetes(app Application, path string, add func(Severi
 			}
 			if ps.Matchers[key] == "" {
 				add(SeverityError, path+".podSelector.matchers."+key, "标签值不能为空")
+			} else if err := validateUTF8(ps.Matchers[key]); err != nil {
+				add(SeverityError, path+".podSelector.matchers."+key, "%v", err)
 			}
 		}
 	case PodSelectorPodRegex:
 		if ps.Pod == "" {
 			add(SeverityError, path+".podSelector.pod", "pod-regex 模式必须提供 pod 正则")
+		} else if err := validateUTF8(ps.Pod); err != nil {
+			add(SeverityError, path+".podSelector.pod", "%v", err)
 		} else if _, err := regexp.Compile(ps.Pod); err != nil {
 			add(SeverityError, path+".podSelector.pod", "正则非法: %v", err)
 		} else {
@@ -446,13 +480,38 @@ func validateApplicationKubernetes(app Application, path string, add func(Severi
 		if matcher.Name == SitegenAppLabel {
 			add(SeverityError, matcherPath+".name", "sitegen_app 为生成器保留标签，不允许配置")
 		}
-		if matcher.Value == "" {
-			add(SeverityError, matcherPath+".value", "标签值不能为空")
+		switch matcher.Name {
+		case "job", "instance":
+			add(SeverityError, matcherPath+".name",
+				"容器过滤只作用于 cAdvisor 容器序列，不能用 %q 过滤；应用 Prometheus Job 不等于 cAdvisor Job。请改用 container/image 等容器标签，或跳过", matcher.Name)
+		case "namespace", "pod":
+			add(SeverityError, matcherPath+".name",
+				"%q 由应用配置或 Pod 归属规则管理，不能作为容器过滤条件；请使用 container/image 等容器标签", matcher.Name)
+		}
+		if err := validateUTF8(matcher.Value); err != nil {
+			add(SeverityError, matcherPath+".value", "%v", err)
 		}
 		switch matcher.EffectiveOperator() {
-		case MatchEqual, MatchNotEqual:
-		case MatchRegex, MatchNotRegex:
-			if _, err := regexp.Compile(matcher.Value); err != nil {
+		case MatchEqual:
+			// An empty equality value matches every series that is missing
+			// the label; it is almost never what the user means.
+			if matcher.Value == "" {
+				add(SeverityError, matcherPath+".value",
+					"equal 操作符不允许空字符串；如需排除空标签，请使用 not_equal \"\"")
+			}
+		case MatchNotEqual:
+			// Explicitly allowed: excludes series that do not carry the label.
+		case MatchRegex:
+			if matcher.Value == "" {
+				add(SeverityError, matcherPath+".value", "regex 操作符不允许空正则")
+			} else if _, err := regexp.Compile(matcher.Value); err != nil {
+				add(SeverityError, matcherPath+".value", "正则非法: %v", err)
+			}
+		case MatchNotRegex:
+			if matcher.Value == "" {
+				add(SeverityError, matcherPath+".value",
+					"not_regex 不允许空正则；如需排除空标签，请使用 not_equal \"\"")
+			} else if _, err := regexp.Compile(matcher.Value); err != nil {
 				add(SeverityError, matcherPath+".value", "正则非法: %v", err)
 			}
 		default:
@@ -476,6 +535,8 @@ func validateTargetLabels(labels map[string]string, path string, add func(Severi
 		}
 		if strings.TrimSpace(labels[key]) == "" {
 			add(SeverityError, labelPath, "标签值不能为空")
+		} else if err := validateUTF8(labels[key]); err != nil {
+			add(SeverityError, labelPath, "%v", err)
 		}
 	}
 }

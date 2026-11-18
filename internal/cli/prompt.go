@@ -12,6 +12,37 @@ import (
 // ErrCancelled is returned when the user explicitly aborts or input ends.
 var ErrCancelled = errors.New("用户取消")
 
+// ErrDraftSaved indicates that the wizard stopped and persisted a draft.
+var ErrDraftSaved = errors.New("草稿已保存")
+
+// ErrViewOnly indicates the user chose "view full configuration" in edit mode.
+var ErrViewOnly = errors.New("仅查看配置")
+
+// Navigation sentinels accepted inside any prompt as ":" commands.
+var (
+	ErrStepBack = errors.New("返回上一步")
+	ErrStepEdit = errors.New("重新编辑当前步骤")
+	ErrStepSkip = errors.New("跳过当前步骤")
+	ErrStepQuit = errors.New("退出并保存草稿")
+)
+
+// StepAction is the result of the step-level navigation menu.
+type StepAction int
+
+const (
+	StepNext StepAction = iota
+	StepBack
+	StepEdit
+	StepSkip
+	StepQuit
+)
+
+// Navigator is implemented by interactive prompters that can show the
+// step-level menu. Test prompters may omit it; the wizard then advances.
+type Navigator interface {
+	ChooseStepAction(title string, index, total int, canBack, optional bool) (StepAction, error)
+}
+
 // Prompter isolates the interactive workflow from terminal I/O so the wizard
 // and commands can be unit tested with scripted answers.
 type Prompter interface {
@@ -35,11 +66,62 @@ func (p *TerminalPrompter) readLine() (string, error) {
 	line, err := p.reader.ReadString('\n')
 	if err != nil {
 		if errors.Is(err, io.EOF) && strings.TrimSpace(line) != "" {
-			return strings.TrimSpace(strings.TrimRight(line, "\r\n")), nil
+			line = strings.TrimSpace(strings.TrimRight(line, "\r\n"))
+		} else {
+			return "", ErrCancelled
 		}
-		return "", ErrCancelled
+	} else {
+		line = strings.TrimSpace(strings.TrimRight(line, "\r\n"))
 	}
-	return strings.TrimSpace(strings.TrimRight(line, "\r\n")), nil
+	// ":" prefixed commands work in every prompt without colliding with
+	// ordinary values such as an application named "b".
+	switch line {
+	case ":b":
+		return "", ErrStepBack
+	case ":e":
+		return "", ErrStepEdit
+	case ":s":
+		return "", ErrStepSkip
+	case ":q":
+		return "", ErrStepQuit
+	}
+	return line, nil
+}
+
+// ChooseStepAction prints the navigation menu required at every wizard stage.
+func (p *TerminalPrompter) ChooseStepAction(title string, index, total int, canBack, optional bool) (StepAction, error) {
+	fmt.Fprintf(p.out, "\n========== 步骤 %d/%d: %s ==========\n", index+1, total, title)
+	fmt.Fprintln(p.out, "[Enter] 继续  [e] 重新编辑当前步骤  [b] 返回上一步  [s] 跳过  [q] 退出并保存草稿")
+	fmt.Fprintln(p.out, "提示：在任何输入处可用 :b / :e / :s / :q 执行相同操作。")
+	for {
+		fmt.Fprint(p.out, "操作: ")
+		raw, err := p.readLine()
+		if err != nil {
+			return StepNext, err
+		}
+		switch strings.ToLower(raw) {
+		case "":
+			return StepNext, nil
+		case "e":
+			return StepEdit, nil
+		case "b":
+			if !canBack {
+				fmt.Fprintln(p.out, "已经是第一步，无法返回。")
+				continue
+			}
+			return StepBack, nil
+		case "s":
+			if !optional {
+				fmt.Fprintln(p.out, "该步骤为必填，不能跳过。")
+				continue
+			}
+			return StepSkip, nil
+		case "q":
+			return StepQuit, nil
+		default:
+			fmt.Fprintln(p.out, "请输入 Enter、e、b、s 或 q。")
+		}
+	}
 }
 
 func (p *TerminalPrompter) Input(label, defaultValue string, validate func(string) error) (string, error) {
