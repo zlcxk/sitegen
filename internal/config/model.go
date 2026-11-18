@@ -200,11 +200,23 @@ type ComponentPrometheus struct {
 }
 
 // Skywalking contains the service mapping, endpoint format and optional UI
-// drill-down configuration.
+// drill-down configuration. Enabled is optional for compatibility: when it is
+// nil, a non-empty Service means the application participates in APM panels.
 type Skywalking struct {
+	Enabled        *bool        `yaml:"enabled,omitempty" json:"enabled,omitempty"`
 	Service        string       `yaml:"service" json:"service"`
 	EndpointFormat string       `yaml:"endpointFormat,omitempty" json:"endpointFormat,omitempty"`
 	UI             SkywalkingUI `yaml:"ui,omitempty" json:"ui,omitempty"`
+}
+
+// SkywalkingEnabled reports whether the application should generate
+// SkyWalking APM panels. An explicit enabled flag wins; otherwise the presence
+// of a service mapping keeps existing configurations working.
+func (a Application) SkywalkingEnabled() bool {
+	if a.Skywalking.Enabled != nil {
+		return *a.Skywalking.Enabled
+	}
+	return strings.TrimSpace(a.Skywalking.Service) != ""
 }
 
 // SkywalkingUI configures application-specific SkyWalking UI drill-down.
@@ -225,12 +237,30 @@ type Component struct {
 
 // Links contains optional observability UI addresses and drill-down targets.
 type Links struct {
-	Skywalking                    string            `yaml:"skywalking,omitempty" json:"skywalking,omitempty"`
-	Prometheus                    string            `yaml:"prometheus,omitempty" json:"prometheus,omitempty"`
-	Grafana                       string            `yaml:"grafana,omitempty" json:"grafana,omitempty"`
-	SkywalkingServiceURLTemplate  string            `yaml:"skywalkingServiceURLTemplate,omitempty" json:"skywalkingServiceURLTemplate,omitempty"`
-	SkywalkingEndpointURLTemplate string            `yaml:"skywalkingEndpointURLTemplate,omitempty" json:"skywalkingEndpointURLTemplate,omitempty"`
-	ComponentDashboards           map[string]string `yaml:"componentDashboards,omitempty" json:"componentDashboards,omitempty"`
+	Skywalking                    string `yaml:"skywalking,omitempty" json:"skywalking,omitempty"`
+	Prometheus                    string `yaml:"prometheus,omitempty" json:"prometheus,omitempty"`
+	Grafana                       string `yaml:"grafana,omitempty" json:"grafana,omitempty"`
+	SkywalkingServiceURLTemplate  string `yaml:"skywalkingServiceURLTemplate,omitempty" json:"skywalkingServiceURLTemplate,omitempty"`
+	SkywalkingEndpointURLTemplate string `yaml:"skywalkingEndpointURLTemplate,omitempty" json:"skywalkingEndpointURLTemplate,omitempty"`
+	// Grafana dashboard bases for per-row APM drill-down. Use a relative
+	// `d/<uid>/<slug>` path or a full URL. Query parameters are built by Go.
+	SkywalkingInstanceDashboard string `yaml:"skywalkingInstanceDashboard,omitempty" json:"skywalkingInstanceDashboard,omitempty"`
+	SkywalkingEndpointDashboard string `yaml:"skywalkingEndpointDashboard,omitempty" json:"skywalkingEndpointDashboard,omitempty"`
+	SkywalkingTraceDashboard    string `yaml:"skywalkingTraceDashboard,omitempty" json:"skywalkingTraceDashboard,omitempty"`
+	SkywalkingServiceDashboard  string `yaml:"skywalkingServiceDashboard,omitempty" json:"skywalkingServiceDashboard,omitempty"`
+	// ComponentDashboardParams maps a component type to Dashboard query
+	// parameters. Values may use {instance}, {host}, {job}, {component}, {type}.
+	ComponentDashboardParams map[string]map[string]string `yaml:"componentDashboardParams,omitempty" json:"componentDashboardParams,omitempty"`
+	// Dashboards are additional user-configured professional Dashboard links.
+	Dashboards []LinkEntry `yaml:"dashboards,omitempty" json:"dashboards,omitempty"`
+
+	ComponentDashboards map[string]string `yaml:"componentDashboards,omitempty" json:"componentDashboards,omitempty"`
+}
+
+// LinkEntry is one user-configured Dashboard navigation link.
+type LinkEntry struct {
+	Title string `yaml:"title" json:"title"`
+	URL   string `yaml:"url" json:"url"`
 }
 
 // DefaultSkywalkingService returns the default SkyWalking service name.
@@ -266,7 +296,8 @@ func Normalize(site *Site) {
 		app.Prometheus.Job = strings.TrimSpace(app.Prometheus.Job)
 		app.Skywalking.Service = strings.TrimSpace(app.Skywalking.Service)
 		app.Skywalking.EndpointFormat = strings.TrimSpace(app.Skywalking.EndpointFormat)
-		if app.Skywalking.Service == "" && app.Application != "" && app.Namespace != "" {
+		if app.Skywalking.Service == "" && (app.Skywalking.Enabled == nil || *app.Skywalking.Enabled) &&
+			app.Application != "" && app.Namespace != "" {
 			app.Skywalking.Service = DefaultSkywalkingService(app.Application, app.Namespace)
 		}
 		if app.Skywalking.EndpointFormat == "" {
@@ -417,6 +448,24 @@ func MergeLinks(base, override Links) Links {
 	}
 	if override.SkywalkingEndpointURLTemplate != "" {
 		out.SkywalkingEndpointURLTemplate = override.SkywalkingEndpointURLTemplate
+	}
+	if override.SkywalkingInstanceDashboard != "" {
+		out.SkywalkingInstanceDashboard = override.SkywalkingInstanceDashboard
+	}
+	if override.SkywalkingEndpointDashboard != "" {
+		out.SkywalkingEndpointDashboard = override.SkywalkingEndpointDashboard
+	}
+	if override.SkywalkingTraceDashboard != "" {
+		out.SkywalkingTraceDashboard = override.SkywalkingTraceDashboard
+	}
+	if override.SkywalkingServiceDashboard != "" {
+		out.SkywalkingServiceDashboard = override.SkywalkingServiceDashboard
+	}
+	if len(override.ComponentDashboardParams) > 0 {
+		out.ComponentDashboardParams = override.ComponentDashboardParams
+	}
+	if len(override.Dashboards) > 0 {
+		out.Dashboards = append([]LinkEntry(nil), override.Dashboards...)
 	}
 	if len(override.ComponentDashboards) > 0 {
 		out.ComponentDashboards = make(map[string]string, len(base.ComponentDashboards)+len(override.ComponentDashboards))

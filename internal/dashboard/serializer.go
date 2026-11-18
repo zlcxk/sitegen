@@ -131,8 +131,9 @@ func validatePanelList(panels []Panel, ids map[int]bool) error {
 				return fmt.Errorf("文本面板 %q 内容为空", panel.Title)
 			}
 		case "timeseries", "stat", "table", "bargauge", "gauge":
-			if panel.Datasource == nil || panel.Datasource.UID != datasourceUID {
-				return fmt.Errorf("数据面板 %q 未绑定 %s 数据源", panel.Title, datasourceVarName)
+			if panel.Datasource == nil || panel.Datasource.Type != "prometheus" ||
+				(panel.Datasource.UID != datasourceUID && panel.Datasource.UID != skywalkingPrometheusUID) {
+				return fmt.Errorf("数据面板 %q 未绑定有效 Prometheus 数据源", panel.Title)
 			}
 			if len(panel.Targets) == 0 {
 				return fmt.Errorf("数据面板 %q 没有查询", panel.Title)
@@ -147,6 +148,20 @@ func validatePanelList(panels []Panel, ids map[int]bool) error {
 				if strings.Contains(target.Expr, "{{") {
 					return fmt.Errorf("面板 %q 存在未替换的模板占位符", panel.Title)
 				}
+			}
+		case "nodeGraph":
+			if panel.Datasource == nil || panel.Datasource.Type != "apache-skywalking-datasource" ||
+				panel.Datasource.UID != skywalkingDatasourceUID {
+				return fmt.Errorf("Node Graph 面板 %q 未绑定 SkyWalking 原生数据源", panel.Title)
+			}
+			if len(panel.Targets) != 1 {
+				return fmt.Errorf("Node Graph 面板 %q 必须且只能有一个查询", panel.Title)
+			}
+			target := panel.Targets[0]
+			if strings.TrimSpace(target.Service) == "" ||
+				strings.TrimSpace(target.NodeMetrics) == "" ||
+				strings.TrimSpace(target.EdgeMetrics) == "" {
+				return fmt.Errorf("Node Graph 面板 %q 缺少 service/nodeMetrics/edgeMetrics", panel.Title)
 			}
 		default:
 			return fmt.Errorf("面板 %q 使用了不支持的类型 %q", panel.Title, panel.Type)
@@ -173,9 +188,7 @@ func validateVariables(d *Dashboard) error {
 		if variable.Query == nil {
 			return fmt.Errorf("Dashboard 变量 %q 的 query 不能为空", variable.Name)
 		}
-		if query, ok := variable.Query.(string); ok {
-			queries[variable.Name] = query
-		}
+		queries[variable.Name] = variableQueryText(variable.Query)
 	}
 	if !hasDatasourceVar {
 		return fmt.Errorf("Dashboard 缺少 %s 数据源变量", datasourceVarName)
@@ -203,6 +216,29 @@ func validateVariables(d *Dashboard) error {
 	if err := walkPanelQueries(d.Panels, checkRefs); err != nil {
 		return err
 	}
+	// Datasource variables are referenced from panel/target datasource UIDs,
+	// not from the query text.
+	markDatasource := func(datasource *Datasource) {
+		if datasource == nil {
+			return
+		}
+		for _, match := range dashboardVarRE.FindAllStringSubmatch(datasource.UID, -1) {
+			used[match[1]] = true
+		}
+	}
+	var walkDatasources func([]Panel)
+	walkDatasources = func(panels []Panel) {
+		for i := range panels {
+			markDatasource(panels[i].Datasource)
+			for j := range panels[i].Targets {
+				markDatasource(&panels[i].Targets[j].Datasource)
+			}
+			if panels[i].Panels != nil {
+				walkDatasources(*panels[i].Panels)
+			}
+		}
+	}
+	walkDatasources(d.Panels)
 	for name := range defined {
 		if !used[name] {
 			return fmt.Errorf("Dashboard 变量 %q 没有被任何面板或变量查询使用；不允许保留装饰性变量", name)
@@ -226,8 +262,10 @@ func validateVariables(d *Dashboard) error {
 func walkPanelQueries(panels []Panel, fn func(string) error) error {
 	for _, panel := range panels {
 		for _, target := range panel.Targets {
-			if err := fn(target.Expr); err != nil {
-				return fmt.Errorf("面板 %q: %w", panel.Title, err)
+			for _, expr := range []string{target.Expr, target.Service, target.Layer} {
+				if err := fn(expr); err != nil {
+					return fmt.Errorf("面板 %q: %w", panel.Title, err)
+				}
 			}
 		}
 		if panel.Panels != nil {
@@ -237,6 +275,18 @@ func walkPanelQueries(panels []Panel, fn func(string) error) error {
 		}
 	}
 	return nil
+}
+
+func variableQueryText(query any) string {
+	switch value := query.(type) {
+	case string:
+		return value
+	case map[string]any:
+		text, _ := value["query"].(string)
+		return text
+	default:
+		return ""
+	}
 }
 
 func validateGrid(panel Panel) error {

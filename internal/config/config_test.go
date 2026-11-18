@@ -508,3 +508,53 @@ func TestToolConfigTimeout(t *testing.T) {
 		t.Fatal("expected max duration error")
 	}
 }
+
+func TestSkywalkingEnabledRequiresService(t *testing.T) {
+	site, reg := loadExample(t)
+	enabled := true
+	site.Spec.Applications[0].Skywalking.Enabled = &enabled
+	site.Spec.Applications[0].Skywalking.Service = ""
+	issues := config.Validate(site, reg.Resolve)
+	if !issues.HasErrors() {
+		t.Fatal("enabled SkyWalking without service must fail")
+	}
+}
+
+func TestSkywalkingDisabledDoesNotRequireService(t *testing.T) {
+	site, reg := loadExample(t)
+	disabled := false
+	site.Spec.Applications[0].Skywalking.Enabled = &disabled
+	site.Spec.Applications[0].Skywalking.Service = ""
+	if issues := config.Validate(site, reg.Resolve); issues.HasErrors() {
+		t.Fatalf("disabled SkyWalking must not require service: %v", issues.ErrorStrings())
+	}
+	if site.Spec.Applications[0].SkywalkingEnabled() {
+		t.Fatal("explicit enabled=false must win")
+	}
+}
+
+func TestToolConfigDatasourcesValidation(t *testing.T) {
+	cfg, _, err := config.LoadToolConfig("../../sitegen.example.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if issues := config.ValidateToolConfig(cfg); issues.HasErrors() {
+		t.Fatalf("example datasources must validate: %v", issues.ErrorStrings())
+	}
+	cfg.Datasources.Skywalking.Type = "prometheus"
+	cfg.Datasources.BusinessPrometheus.UID = "bad uid!"
+	issues := config.ValidateToolConfig(cfg)
+	if !issues.HasErrors() {
+		t.Fatal("expected invalid datasource config errors")
+	}
+	joined := strings.Join(issues.ErrorStrings(), "\n")
+	if !strings.Contains(joined, "apache-skywalking-datasource") || !strings.Contains(joined, "UID") {
+		t.Fatalf("unexpected datasource errors: %s", joined)
+	}
+	cfg.Datasources.Skywalking.Type = "apache-skywalking-datasource"
+	cfg.Datasources.BusinessPrometheus.UID = ""
+	cfg.Prometheus.SkywalkingURL = "ftp://bad"
+	if issues := config.ValidateToolConfig(cfg); !issues.HasErrors() {
+		t.Fatal("expected invalid SkyWalking Prometheus URL error")
+	}
+}

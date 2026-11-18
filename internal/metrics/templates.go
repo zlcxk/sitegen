@@ -11,30 +11,38 @@ import (
 const (
 	SectionOverview    = "overview"
 	SectionHTTP        = "http"
+	SectionAPM         = "apm"
 	SectionRuntime     = "runtime"
 	SectionService     = "service"
+	SectionInstances   = "instances"
 	SectionComponent   = "component"
 	SectionEnvironment = "environment"
 )
 
-// SectionOrder is the only dashboard row order.
+// SectionOrder is the only dashboard row order. It follows the diagnostic
+// chain: site -> HTTP -> APM -> topology -> instances/endpoints -> JVM/K8s ->
+// dependencies.
 var SectionOrder = []string{
 	SectionOverview,
 	SectionHTTP,
-	SectionRuntime,
+	SectionAPM,
 	SectionService,
-	SectionComponent,
+	SectionInstances,
+	SectionRuntime,
 	SectionEnvironment,
+	SectionComponent,
 }
 
 // SectionTitle is the Chinese dashboard row title.
 var SectionTitle = map[string]string{
 	SectionOverview:    "站点健康总览",
 	SectionHTTP:        "HTTP 请求分析",
-	SectionRuntime:     "应用与 JVM",
-	SectionService:     "服务调用关系",
+	SectionAPM:         "应用 APM 分析",
+	SectionService:     "服务调用拓扑",
+	SectionInstances:   "应用实例与 Endpoint",
+	SectionRuntime:     "JVM 应用运行状态",
 	SectionComponent:   "依赖组件",
-	SectionEnvironment: "Kubernetes 运行环境",
+	SectionEnvironment: "Kubernetes 运行状态",
 }
 
 // Scope determines how %SELECTOR% is rendered.
@@ -44,6 +52,9 @@ const (
 	ScopeComponent   = "component"
 	ScopeDomain      = "domain"
 	ScopeJob         = "job"
+	// ScopeSkywalking panels use the selected SkyWalking service variable
+	// instead of per-application Selector rewriting.
+	ScopeSkywalking = "skywalking"
 )
 
 // DiscoverySpec tells the read-only discovery command which real metric and
@@ -57,14 +68,18 @@ type DiscoverySpec struct {
 
 // Profile is a user-selectable bundle of metric panels.
 type Profile struct {
-	ID             string         `yaml:"id"`
-	Name           string         `yaml:"name"`
-	Target         string         `yaml:"target"`
-	Scope          string         `yaml:"scope"`
-	ComponentTypes []string       `yaml:"componentTypes,omitempty"`
-	Auto           bool           `yaml:"auto,omitempty"`
-	Discovery      *DiscoverySpec `yaml:"discovery,omitempty"`
-	Panels         []Panel        `yaml:"panels"`
+	ID             string   `yaml:"id"`
+	Name           string   `yaml:"name"`
+	Target         string   `yaml:"target"`
+	Scope          string   `yaml:"scope"`
+	ComponentTypes []string `yaml:"componentTypes,omitempty"`
+	Auto           bool     `yaml:"auto,omitempty"`
+	// Datasource selects the Grafana data source role for all panels in the
+	// profile: business (default), skywalking_prometheus or
+	// skywalking_datasource.
+	Datasource string         `yaml:"datasource,omitempty"`
+	Discovery  *DiscoverySpec `yaml:"discovery,omitempty"`
+	Panels     []Panel        `yaml:"panels"`
 }
 
 // Panel aggregation scopes.
@@ -78,22 +93,32 @@ const (
 	AggregationSite = "site"
 )
 
+// NodeGraphSpec carries the SkyWalking native Node Graph query fields.
+type NodeGraphSpec struct {
+	NodeMetrics string `yaml:"nodeMetrics"`
+	EdgeMetrics string `yaml:"edgeMetrics"`
+	Layer       string `yaml:"layer,omitempty"`
+}
+
 // Panel describes one Grafana panel and its PromQL template.
 type Panel struct {
-	ID              string      `yaml:"id"`
-	Name            string      `yaml:"name"`
-	Description     string      `yaml:"description,omitempty"`
-	Query           string      `yaml:"query"`
-	Unit            string      `yaml:"unit"`
-	Panel           string      `yaml:"panel"`
-	LegendFormat    string      `yaml:"legendFormat,omitempty"`
-	Sections        []string    `yaml:"sections"`
-	Aggregation     string      `yaml:"aggregation,omitempty"`
-	Instant         bool        `yaml:"instant,omitempty"`
-	Thresholds      []Threshold `yaml:"thresholds,omitempty"`
-	RequiredMetrics []string    `yaml:"requiredMetrics"`
-	RequiredLabels  []string    `yaml:"requiredLabels,omitempty"`
-	OptionalLabels  []string    `yaml:"optionalLabels,omitempty"`
+	ID              string         `yaml:"id"`
+	Name            string         `yaml:"name"`
+	Description     string         `yaml:"description,omitempty"`
+	Query           string         `yaml:"query"`
+	Unit            string         `yaml:"unit"`
+	Panel           string         `yaml:"panel"`
+	Datasource      string         `yaml:"datasource,omitempty"`
+	LinkTargets     []string       `yaml:"linkTargets,omitempty"`
+	NodeGraph       *NodeGraphSpec `yaml:"nodeGraph,omitempty"`
+	LegendFormat    string         `yaml:"legendFormat,omitempty"`
+	Sections        []string       `yaml:"sections"`
+	Aggregation     string         `yaml:"aggregation,omitempty"`
+	Instant         bool           `yaml:"instant,omitempty"`
+	Thresholds      []Threshold    `yaml:"thresholds,omitempty"`
+	RequiredMetrics []string       `yaml:"requiredMetrics"`
+	RequiredLabels  []string       `yaml:"requiredLabels,omitempty"`
+	OptionalLabels  []string       `yaml:"optionalLabels,omitempty"`
 }
 
 // Threshold is a Grafana threshold step. A nil value is the base color.
@@ -120,8 +145,14 @@ var (
 )
 
 var allowedVars = map[string]bool{
-	"pod":          true,
-	"app_selector": true,
+	"pod":              true,
+	"app_selector":     true,
+	"service":          true,
+	"layer":            true,
+	"service_instance": true,
+	"endpoint":         true,
+	"endpoint_keyword": true,
+	"__url_time_range": true,
 }
 
 var allowedPanelTypes = map[string]bool{
@@ -130,6 +161,7 @@ var allowedPanelTypes = map[string]bool{
 	"table":      true,
 	"bargauge":   true,
 	"gauge":      true,
+	"nodeGraph":  true,
 }
 
 // Requirements exposes the profile's required/optional metrics and labels to

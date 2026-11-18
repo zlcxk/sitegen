@@ -54,6 +54,8 @@ type siteAction struct {
 	dashboardDir          string
 	reportDir             string
 	links                 config.Links
+	datasources           config.DatasourcesConfig
+	skywalkingClient      *discovery.Client
 	lookback              time.Duration
 	concurrency           int
 }
@@ -390,7 +392,7 @@ func (a *app) validateCommand(opts *rootOptions) *cobra.Command {
 func (a *app) checkCommand(opts *rootOptions) *cobra.Command {
 	var sitePath string
 	var all bool
-	var promURL, timeoutRaw string
+	var promURL, skywalkingURL, timeoutRaw string
 	var lookback time.Duration
 	var concurrency int
 	cmd := &cobra.Command{
@@ -421,18 +423,21 @@ func (a *app) checkCommand(opts *rootOptions) *cobra.Command {
 					return err
 				}
 			}
+			skywalkingClient := a.skywalkingClient(skywalkingURL, timeoutRaw, tool)
 			if err := validateLookback(lookback, concurrency); err != nil {
 				return err
 			}
 			action := siteAction{
-				checkProm:    true,
-				requireProm:  true,
-				skipReason:   "未配置 Prometheus URL",
-				reportDir:    opts.reportsDir,
-				dashboardDir: opts.dashboardsDir,
-				links:        tool.Links,
-				lookback:     lookback,
-				concurrency:  concurrency,
+				checkProm:        true,
+				requireProm:      true,
+				skipReason:       "未配置 Prometheus URL",
+				reportDir:        opts.reportsDir,
+				dashboardDir:     opts.dashboardsDir,
+				links:            tool.Links,
+				datasources:      tool.Datasources,
+				skywalkingClient: skywalkingClient,
+				lookback:         lookback,
+				concurrency:      concurrency,
 			}
 			return a.processFiles(cmd.Context(), files, reg, client, action)
 		},
@@ -440,6 +445,7 @@ func (a *app) checkCommand(opts *rootOptions) *cobra.Command {
 	cmd.Flags().StringVar(&sitePath, "site", "", "站点 YAML 文件")
 	cmd.Flags().BoolVar(&all, "all", false, "处理目录下所有站点")
 	cmd.Flags().StringVar(&promURL, "prometheus-url", "", "Prometheus URL（覆盖环境变量和配置文件）")
+	cmd.Flags().StringVar(&skywalkingURL, "skywalking-prometheus-url", "", "SkyWalking Prometheus URL（可选，用于 APM 数据校验）")
 	cmd.Flags().StringVar(&timeoutRaw, "timeout", "", "Prometheus 请求超时（如 15s）")
 	cmd.Flags().DurationVar(&lookback, "lookback", time.Hour, "校验时间窗口")
 	cmd.Flags().IntVar(&concurrency, "concurrency", 4, "Prometheus 查询并发度（1-16）")
@@ -471,6 +477,7 @@ func (a *app) generateCommand(opts *rootOptions) *cobra.Command {
 				reportDir:    opts.reportsDir,
 				dashboardDir: opts.dashboardsDir,
 				links:        tool.Links,
+				datasources:  tool.Datasources,
 			}
 			return a.processFiles(cmd.Context(), files, reg, nil, action)
 		},
@@ -483,7 +490,7 @@ func (a *app) generateCommand(opts *rootOptions) *cobra.Command {
 func (a *app) buildCommand(opts *rootOptions) *cobra.Command {
 	var sitePath string
 	var all, skipProm, strictCheck bool
-	var promURL, timeoutRaw string
+	var promURL, skywalkingURL, timeoutRaw string
 	var lookback time.Duration
 	var concurrency int
 	cmd := &cobra.Command{
@@ -519,6 +526,8 @@ func (a *app) buildCommand(opts *rootOptions) *cobra.Command {
 				reportDir:             opts.reportsDir,
 				dashboardDir:          opts.dashboardsDir,
 				links:                 tool.Links,
+				datasources:           tool.Datasources,
+				skywalkingClient:      a.skywalkingClient(skywalkingURL, timeoutRaw, tool),
 				lookback:              lookback,
 				concurrency:           concurrency,
 			}
@@ -543,6 +552,7 @@ func (a *app) buildCommand(opts *rootOptions) *cobra.Command {
 	cmd.Flags().StringVar(&sitePath, "site", "", "站点 YAML 文件")
 	cmd.Flags().BoolVar(&all, "all", false, "处理目录下所有站点")
 	cmd.Flags().StringVar(&promURL, "prometheus-url", "", "Prometheus URL（覆盖环境变量和配置文件）")
+	cmd.Flags().StringVar(&skywalkingURL, "skywalking-prometheus-url", "", "SkyWalking Prometheus URL（可选，用于 APM 数据校验）")
 	cmd.Flags().StringVar(&timeoutRaw, "timeout", "", "Prometheus 请求超时（如 15s）")
 	cmd.Flags().DurationVar(&lookback, "lookback", time.Hour, "严格检查的时间窗口")
 	cmd.Flags().IntVar(&concurrency, "concurrency", 4, "Prometheus 查询并发度（1-16）")
@@ -674,7 +684,7 @@ func (a *app) processSite(ctx context.Context, path string, reg *metrics.Registr
 	// build/generate add the same checks after the dashboard is built below.
 	if action.checkProm && !action.generate {
 		links := config.MergeLinks(action.links, site.Spec.Links)
-		if d, err := dashboard.Build(site, reg, links); err != nil {
+		if d, err := dashboard.BuildWithDatasources(site, reg, links, action.datasources); err != nil {
 			report.Add("Dashboard 变量", "静态生成", output.Fail, err.Error())
 		} else {
 			addDashboardVariableChecks(report, d)
@@ -705,6 +715,33 @@ func (a *app) processSite(ctx context.Context, path string, reg *metrics.Registr
 			}
 			report.AddAll(checker.Run(ctx))
 		}
+		if siteUsesSkywalking(site) {
+			links := config.MergeLinks(action.links, site.Spec.Links)
+			if action.skywalkingClient != nil {
+				sk := &metrics.SkywalkingChecker{
+					API:     action.skywalkingClient,
+					Site:    site,
+					Options: metrics.CheckOptions{Lookback: action.lookback, Now: a.now},
+				}
+				report.AddAll(sk.Run(ctx))
+			} else {
+				report.Add("SkyWalking", "APM 数据校验", output.Warn,
+					"未配置 SkyWalking Prometheus URL（--skywalking-prometheus-url / SITEGEN_SKYWALKING_PROMETHEUS_URL / prometheus.skywalkingUrl）；已跳过 APM 数据校验")
+			}
+			for _, item := range []struct {
+				name string
+				raw  string
+			}{
+				{"实例下钻链接", links.SkywalkingInstanceDashboard},
+				{"Endpoint 下钻链接", links.SkywalkingEndpointDashboard},
+				{"Trace 下钻链接", links.SkywalkingTraceDashboard},
+			} {
+				if item.raw == "" {
+					report.Add("SkyWalking", item.name, output.Warn,
+						"未配置 "+item.name+"；对应面板不会生成下钻地址")
+				}
+			}
+		}
 		if report.HasFailures() {
 			cause := fmt.Errorf("站点 %s Prometheus 校验失败", site.Metadata.ID)
 			return report, a.failWithReport(report, reportPath, cause)
@@ -713,7 +750,7 @@ func (a *app) processSite(ctx context.Context, path string, reg *metrics.Registr
 
 	if action.generate {
 		links := config.MergeLinks(action.links, site.Spec.Links)
-		d, err := dashboard.Build(site, reg, links)
+		d, err := dashboard.BuildWithDatasources(site, reg, links, action.datasources)
 		if err != nil {
 			report.Add("Dashboard", "生成", output.Fail, err.Error())
 			return report, a.failWithReport(report, reportPath, err)
@@ -752,6 +789,17 @@ func addDashboardVariableChecks(report *output.Report, d *dashboard.Dashboard) {
 	podVariables := 0
 	for _, variable := range d.Templating.List {
 		switch variable.QueryType {
+		case dashboard.VariableQueryTypeDatasource:
+			switch variable.Name {
+			case "skywalking_prometheus":
+				if variable.Query != "prometheus" {
+					modelIssues = append(modelIssues, variable.Name+" 必须是 prometheus 数据源")
+				}
+			case "skywalking_datasource":
+				if variable.Query != "apache-skywalking-datasource" {
+					modelIssues = append(modelIssues, variable.Name+" 必须是 apache-skywalking-datasource")
+				}
+			}
 		case dashboard.VariableQueryTypeCustom:
 			if variable.Multi {
 				modelIssues = append(modelIssues, variable.Name+" 不是单选变量")
@@ -773,9 +821,16 @@ func addDashboardVariableChecks(report *output.Report, d *dashboard.Dashboard) {
 			if variable.AllValue == "" {
 				modelIssues = append(modelIssues, variable.Name+" 缺少 AllValue")
 			}
-			query, _ := variable.Query.(string)
+			query, qryType := variableQueryText(variable.Query)
+			if qryType != 3 {
+				modelIssues = append(modelIssues, variable.Name+" 的 qryType 不是 VarQueryResult(3)，会被错误提交到 match[]")
+			}
 			if !strings.HasPrefix(query, "query_result(") {
 				modelIssues = append(modelIssues, variable.Name+" 查询类型不是 query_result")
+			}
+			if strings.ContainsAny(query, "\r\n") {
+				modelIssues = append(modelIssues,
+					variable.Name+" 的 query_result 包含换行；Grafana 变量解析会误判为 Series Query 并提交到 match[]")
 			}
 			if strings.Contains(query, ":json") {
 				modelIssues = append(modelIssues, variable.Name+" 查询仍使用 :json")
@@ -787,12 +842,19 @@ func addDashboardVariableChecks(report *output.Report, d *dashboard.Dashboard) {
 			fmt.Sprintf("Profile 应用变量为单选 custom，%d 个 Pod 变量使用 query_result，AllValue 与数据源绑定合法", podVariables))
 		for _, variable := range d.Templating.List {
 			switch variable.QueryType {
+			case dashboard.VariableQueryTypeDatasource:
+				report.Add("Dashboard 变量", variable.Name, output.Pass,
+					fmt.Sprintf("datasource 变量，类型 %v", variable.Query))
+				if fmt.Sprint(variable.Current.Value) == "" {
+					report.Add("Dashboard 变量", variable.Name+" 默认值", output.Warn,
+						"未配置默认 UID；导入 Grafana 后需要选择对应数据源")
+				}
 			case dashboard.VariableQueryTypeCustom:
 				report.Add("Dashboard 变量", variable.Name, output.Pass,
-					fmt.Sprintf("单选 custom 变量，包含 %d 个应用选项", len(variable.Options)))
+					fmt.Sprintf("单选 custom 变量，包含 %d 个选项", len(variable.Options)))
 			case dashboard.VariableQueryTypeQueryResult:
 				report.Add("Dashboard 变量", variable.Name+" 定义", output.Pass,
-					"query_result 查询，regexApplyTo=value，AllValue=.*")
+					"query_result 查询（qryType=3，单行），regexApplyTo=value，AllValue=.*")
 			}
 		}
 	} else {
@@ -832,6 +894,25 @@ func addDashboardVariableChecks(report *output.Report, d *dashboard.Dashboard) {
 
 	report.Add("Dashboard 变量", "Grafana 实际插值", output.Warn,
 		"尚未在目标 Grafana 中导入并切换应用/Pod；当前仅完成生成模型与 Prometheus 展开查询校验")
+}
+
+func variableQueryText(query any) (string, int) {
+	switch value := query.(type) {
+	case string:
+		return value, 0
+	case map[string]any:
+		text, _ := value["query"].(string)
+		switch typed := value["qryType"].(type) {
+		case int:
+			return text, typed
+		case float64:
+			return text, int(typed)
+		default:
+			return text, 0
+		}
+	default:
+		return "", 0
+	}
 }
 
 func sortedUniqueStrings(values []string) []string {
@@ -957,6 +1038,53 @@ func resolvePromConfig(flagURL, flagTimeout string, tool *config.ToolConfig) (di
 		TLSCAFile:             tlsCA,
 		TLSInsecureSkipVerify: skipVerify,
 	}, true, nil
+}
+
+func siteUsesSkywalking(site *config.Site) bool {
+	if site == nil {
+		return false
+	}
+	for _, app := range site.Spec.Applications {
+		if app.SkywalkingEnabled() {
+			return true
+		}
+	}
+	return false
+}
+
+func (a *app) skywalkingClient(flagURL, timeoutRaw string, tool *config.ToolConfig) *discovery.Client {
+	rawURL := firstNonEmpty(flagURL, os.Getenv("SITEGEN_SKYWALKING_PROMETHEUS_URL"), tool.Prometheus.SkywalkingURL)
+	if strings.TrimSpace(rawURL) == "" {
+		return nil
+	}
+	timeout, err := config.ParseTimeout(firstNonEmpty(timeoutRaw, os.Getenv("SITEGEN_PROMETHEUS_TIMEOUT"), tool.Prometheus.Timeout))
+	if err != nil {
+		fmt.Fprintf(a.errOut, "提示: SkyWalking Prometheus timeout 非法: %v\n", err)
+		return nil
+	}
+	skipVerify := tool.Prometheus.TLSInsecureSkipVerify
+	if raw := strings.TrimSpace(os.Getenv("SITEGEN_SKYWALKING_PROMETHEUS_TLS_SKIP_VERIFY")); raw != "" {
+		if value, err := strconv.ParseBool(raw); err == nil {
+			skipVerify = value
+		}
+	}
+	client, err := discovery.NewClient(discovery.Config{
+		URL:                   strings.TrimSpace(rawURL),
+		Timeout:               timeout,
+		Username:              os.Getenv("SITEGEN_SKYWALKING_PROMETHEUS_USERNAME"),
+		Password:              os.Getenv("SITEGEN_SKYWALKING_PROMETHEUS_PASSWORD"),
+		BearerToken:           os.Getenv("SITEGEN_SKYWALKING_PROMETHEUS_TOKEN"),
+		TLSCAFile:             firstNonEmpty(os.Getenv("SITEGEN_SKYWALKING_PROMETHEUS_TLS_CA"), tool.Prometheus.TLSCAFile),
+		TLSInsecureSkipVerify: skipVerify,
+		// A Grafana datasource proxy is a valid read-only endpoint for APM
+		// validation and requires a non-root base path.
+		AllowPath: true,
+	})
+	if err != nil {
+		fmt.Fprintf(a.errOut, "提示: 无法创建 SkyWalking Prometheus 客户端: %v\n", err)
+		return nil
+	}
+	return client
 }
 
 func validateLookback(lookback time.Duration, concurrency int) error {

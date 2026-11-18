@@ -36,8 +36,9 @@ make build
 # 只校验 YAML
 ./sitegen validate --site sites/admin.yaml
 
-# 环境验收：连接 Prometheus 校验指标、Selector、标签、Pod 归属和 PromQL
-./sitegen check --site sites/admin.yaml --lookback 1h
+# 环境验收：业务 Prometheus + 可选 SkyWalking Prometheus
+./sitegen check --site sites/admin.yaml --lookback 1h \
+  --skywalking-prometheus-url http://skywalking-oap:9090
 
 # 普通构建：只做静态校验（YAML、配置语义、PromQL 语法、Dashboard 结构）
 ./sitegen build --site sites/admin.yaml
@@ -188,6 +189,85 @@ spec:
 
 Kubernetes 指标不使用 Namespace 全量查询。应用必须通过 `kubernetes.podSelector` 声明 Pod 归属，Builder 会使用 `kube_pod_labels`（或经过验证的 `pod-regex` 兼容模式）与 cAdvisor 指标按 `namespace + pod` 关联。`containerMatchers` 支持 `equal`、`not_equal`、`regex`、`not_regex`；旧版 `{container: main}` 会被识别为等值匹配。未配置 Pod 归属的应用会跳过应用级 Kubernetes 面板并输出 WARN，且不会重复输出容器过滤警告。
 
+### SkyWalking APM 集成
+
+SkyWalking 使用三类独立数据源，UID 不写进模板：
+
+```yaml
+# sitegen.yaml
+prometheus:
+  url: "http://business-prometheus:9090"
+  skywalkingUrl: "http://skywalking-oap:9090"   # 可选，用于 APM 数据校验
+
+datasources:
+  businessPrometheus:
+    uid: ""          # 留空则导入 Grafana 后由用户选择
+    type: prometheus
+  skywalkingPrometheus:
+    uid: ""
+    type: prometheus
+  skywalking:
+    uid: ""
+    type: apache-skywalking-datasource
+```
+
+应用显式启用 APM：
+
+```yaml
+applications:
+  - application: rtd-admin
+    namespace: dev
+    skywalking:
+      enabled: true
+      service: rtd-admin_dev
+```
+
+- `enabled` 未设置时，`service` 非空即视为启用，兼容旧 YAML。
+- 同名应用不同 Namespace 必须映射到不同 Service；重复映射会阻止生成。
+- 应用 APM 使用 `service_apdex`、`service_sla`、`service_cpm`、`service_resp_time`、`service_percentile`。
+- 实例与 Endpoint 使用 `service_instance_*`、`endpoint_*`，固定 Top 10，不生成无效的 `endpoint_limit` 变量。
+- 服务拓扑使用 SkyWalking 原生数据源 + `nodeGraph`，节点/边指标来自 `service_cpm`、`service_sla`、`service_relation_*`，不是 Prometheus 时序图。
+- 实例 / Endpoint / Trace 下钻地址来自 `spec.links` 或工具配置：
+
+```yaml
+links:
+  skywalkingServiceDashboard: "d/<uid>/skywalking-service"
+  skywalkingInstanceDashboard: "d/<uid>/skywalking-instance"
+  skywalkingEndpointDashboard: "d/<uid>/skywalking-endpoint"
+  skywalkingTraceDashboard: "d/<uid>/eksen-skywalking-trace"
+```
+
+生成器使用 `net/url` 编码静态参数，并保留 Grafana 的 `${service:queryparam}`、`${__field.labels.endpoint}`、`${__url_time_range}` 令牌。单个数据源不可用只会影响对应面板：`check` 对 SkyWalking 数据缺失输出 WARN，不会让业务 Prometheus/JVM/组件检查整体失败。
+
+**专业 Dashboard 边界：**
+
+- 不再用静态文本模拟服务调用关系；服务行只保留真实 SkyWalking Node Graph。
+- 删除“SkyWalking 服务映射与下钻”和“YAML 配置依赖”两个静态文本面板；当前 `$service` 的完整分析通过 Dashboard 链接 `SkyWalking 服务详情` 进入专业 SkyWalking Dashboard。
+- 删除“依赖组件与下钻”的详细静态清单，只保留指向专业 Dashboard 的精简导航；MySQL/Redis/Kafka 的运行状态仍在站点健康总览中，深度指标由各自专业 Dashboard 承担。
+- 额外专业 Dashboard 可以显式配置，不复制其面板：
+
+```yaml
+links:
+  componentDashboards:
+    mysql: "<mysql-dashboard-uid>"
+    redis: "<redis-dashboard-uid>"
+  componentDashboardParams:
+    mysql:
+      var-host: "{instance}"
+      var-node_host: "{host}"
+    redis:
+      var-instance: "{instance}"
+  dashboards:
+    - title: "Kubernetes 集群"
+      url: "d/<k8s-dashboard-uid>/k8s-dashboard?var-NameSpace=dev"
+    - title: "Blackbox Prober"
+      url: "d/<blackbox-dashboard-uid>/blackbox-exporter-http-prober?var-job=blackbox-sites-dev"
+```
+
+JVM 面板不再暴露 `jvm_pod` 变量，按 application + namespace 聚合 Heap、Non-Heap、GC、线程、进程 CPU 和运行时长；Kubernetes Pod 维度保留在 Kubernetes 区域。
+
+Dashboard 标题和描述包含站点域名，Blackbox 面板标题也使用完整域名 URL，避免站点与域名上下文丢失。
+
 JSON Schema 位于 [schemas/site.schema.json](schemas/site.schema.json)，可用于编辑器补全。加载器本身仍会执行严格字段检查和跨对象校验。
 
 ---
@@ -244,10 +324,13 @@ Dashboard 已生成。
 
 ```text
 --prometheus-url URL
+--skywalking-prometheus-url URL   # 可选；校验 SkyWalking APM 指标
 --timeout 15s
 --lookback 1h
 --concurrency 4       # 1-16
 ```
+
+SkyWalking Prometheus 也可以通过 `SITEGEN_SKYWALKING_PROMETHEUS_URL` 或工具配置 `prometheus.skywalkingUrl` 提供。SkyWalking 数据缺失、原生拓扑尚未在 Grafana 验证时只输出 WARN，不会让业务 Prometheus/JVM/组件检查整体失败。
 
 `--skip-prometheus` 保留为兼容参数；普通 `build` 默认已经不执行实时数据检查。
 
@@ -470,22 +553,26 @@ Pod 归属失败后，下游 Kubernetes 覆盖检查和容器过滤检查记为 
 
 1. **站点健康总览**（默认展开）：域名可用性/探测耗时、入口应用请求量、2xx/P95/5xx、应用指标采集状态、依赖组件状态。
 2. **HTTP 请求分析**：当前所选应用的 RPS、2xx/3xx/4xx/5xx 比例、平均延迟、P95/P99、状态码分布、慢接口 Top 10、高请求量 Endpoint、按 Method 的 RPS。
-3. **应用与 JVM**：当前所选应用的 JVM Heap（按 Pod / 内存池）。
-4. **服务调用关系**：SkyWalking Service 映射与下钻、YAML 配置依赖；不伪造实测拓扑。
-5. **依赖组件**：组件清单、专业 Dashboard 下钻；状态面板只出现在总览一次。
-6. **Kubernetes 运行环境**：Pod 状态、Node 分布、Pod CPU/内存/Throttling。JVM Heap 不在此重复。
+3. **应用 APM 分析**：Service Apdex、成功率、CPM、平均响应时间、P50/P75/P90/P95/P99。
+4. **服务调用拓扑**：只保留 SkyWalking 原生数据源 Node Graph，展示真实服务节点和调用边；不再用静态文本模拟拓扑。当前 `$service` 的完整服务分析通过 Dashboard 链接进入专业 SkyWalking Service Dashboard。
+5. **应用实例与 Endpoint**：实例 Top 10 请求量/响应时间/成功率，Endpoint Top 10 请求量/响应时间/成功率，以及实例/Endpoint/Trace 下钻。
+6. **JVM 应用运行状态**：按 application + namespace 聚合 Heap、Heap 使用率、Non-Heap、内存池、GC 次数/暂停时间、线程数、进程 CPU、运行时长。不再提供 JVM Pod 变量。
+7. **Kubernetes 运行状态**：Pod 状态、Node 分布、Pod CPU/内存/Throttling，保留 `$k8s_pod` 变量。
+8. **依赖组件**：MySQL、Redis、Kafka 等组件状态在站点健康总览中展示；本行只保留指向专业 Dashboard 的精简导航，不复制其性能面板，也不使用静态文本冒充监控结果。
 
 除总览外，其余 Row 默认折叠，首屏即可看到站点和依赖健康。
 
 ### 变量
 
-各指标区域使用独立的应用选择变量，只包含启用了对应 Profile 的应用：
-
-- `$datasource`：Prometheus 数据源。
+- `$datasource`：业务 Prometheus 数据源。
+- `$skywalking_prometheus`：SkyWalking OAP 暴露的 Prometheus 数据源。
+- `$skywalking_datasource`：SkyWalking 原生数据源，用于 Node Graph。
+- `$service`：APM 服务选择器，选项来自启用 SkyWalking 的应用，值为 SkyWalking Service 名称。
+- `$layer`：隐藏变量，默认 `GENERAL`。
 - `$http_app_selector`：仅包含启用 `http` 的应用。
 - `$jvm_app_selector`：仅包含启用 `jvm` 的应用。
 - `$k8s_app_selector`：仅包含启用 `kubernetes` 且配置了 `podSelector` 的应用。
-- `$jvm_pod` / `$k8s_pod`：分别由对应应用选择器关联的 Pod 集合产生。
+- `$k8s_pod`：由 Kubernetes 应用选择器关联的 Pod 集合产生；JVM 不再有 Pod 变量。
 
 每个选项文本为 `Application / Namespace`，值为唯一应用配置 ID；同名应用跨 Namespace 时可以独立选择。没有对应 Profile 的应用不会出现在该区域的选择列表中，因此不会因为变量范围不一致出现误导性的 No Data。
 
@@ -501,8 +588,8 @@ Pod 归属失败后，下游 Kubernetes 覆盖检查和容器过滤检查记为 
 | PromQL 字符串参数 | `label_replace(..., "${jvm_app_selector}", ...)` |
 | JSON 数据 | 仅在确实需要 JSON 时使用 `:json` |
 
-- 应用选择器是单选 `custom` 变量，`valuesFormat: csv`，值为应用配置 ID。
-- Pod 变量使用 `query_result(...)`，`regexApplyTo: value`，`AllValue: .*`。
+- 应用选择器是单选 `custom` 变量，`valuesFormat: csv`，值为应用配置 ID；SkyWalking `$service` 同样为单选 custom，值为服务名。
+- Pod 变量使用 Prometheus 变量对象 `{"qryType":3,"query":"query_result(...)"}`，`regexApplyTo: value`，`AllValue: .*`。`qryType=3` 是 VarQueryResult，确保 Grafana 走 Query API，而不是把 `query_result(...)` 提交到 `/api/v1/series` 的 `match[]`。
 - **不再在 PromQL 中使用 `${var:json}`**：JSON 数组不是 PromQL 字符串字面量。
 - 静态 Pod 归属（`kubernetes.podSelector`）和动态 Pod 选择（Pod 变量）分别生成；Pod 正则变量必须放在双引号内并使用 `:regex`。
 - `pod-regex` 模式下生成的 `pod=~"^app-.*$", pod=~"${k8s_pod:regex}"` 是**交集过滤**：前者限定应用 Pod，后者是用户在 Grafana 中的 Pod 选择；两者来源不同、各追加一次，不是重复 Matcher。`labels` 模式不使用静态 Pod 正则，而是通过 `kube_pod_labels` 关联应用 Pod。
@@ -573,19 +660,22 @@ make generate-example
 - Grafana 变量模型与格式：`query_result` Pod 变量、`regexApplyTo=value`、`AllValue=.*`、应用选择器单选 `custom`、禁止 `:json`、正则变量必须加引号；
 - 模板校验拒绝 `:json` 和未加引号的正则变量；
 - `discover` 的应用/域名/组件/Pod/容器候选发现、站点过滤、真实标签值与 Pod 正则验证；
-- 创建向导自动发现模式：域名、应用、Profile、组件、Pod 归属和 Container Matcher 均来自真实数据。
+- 创建向导自动发现模式：域名、应用、Profile、组件、Pod 归属和 Container Matcher 均来自真实数据；
+- SkyWalking 变量、三类数据源、APM/拓扑/实例/Endpoint 面板、Node Graph target、实例/Endpoint/Trace 链接编码；
+- JVM 不再生成 `jvm_pod`，JVM 查询按应用聚合；`k8s_pod` 使用 `qryType=3`；
+- SkyWalking Prometheus 检查对缺失数据返回 WARN，不影响业务 Prometheus 检查。
 
 ---
 
 ## 10. 版本与限制
 
-当前为 V1.0.4：
+当前为 V1.0.5：
 
 - 不提供 Web 后台、数据库、告警规则生成或自动发布；
 - 不修改 Prometheus Operator / ServiceMonitor / ScrapeConfig；
-- 不修改 SkyWalking 配置；
-- SkyWalking 仅提供稳定的页面入口和 YAML 服务映射，不伪造数据源；
-- JVM 只包含已确认的 Heap 指标，GC/Threads 待真实环境验证后加入；
+- 不修改 SkyWalking OAP、BanyanDB 或 Java Agent 配置；
+- SkyWalking APM 使用业务 Prometheus、SkyWalking Prometheus、SkyWalking 原生数据源三类独立引用；原生 Node Graph 只能由 SkyWalking 数据源执行，必须导入 Grafana 验证；
+- JVM 面板包含 Heap/Non-Heap/GC/线程/进程 CPU/运行时长，已用目标 Prometheus 真实指标验证；不再暴露 JVM Pod 变量；
 - K8s 使用标准 cAdvisor / kube-state-metrics 指标，但仍应通过 `sitegen check` 在目标 Prometheus 上确认；
 - Nacos 仅验证 exporter 抓取状态，Kafka 仅展示 Broker 数，后续再扩展性能指标；
 - 应用由完整对象标识（application + namespace + job + 额外标签）；多应用聚合通过 PromQL AST 按对象逐一编译，不使用独立标签正则组合，也不会把 Range Selector 改为 Subquery；
@@ -593,7 +683,20 @@ make generate-example
 - 站点级外部请求汇总只统计域名 `entryApplications`，下游应用内部调用不会重复计入；
 - Kubernetes 应用级面板要求显式 `kubernetes.podSelector`；无法建立 Pod 归属时跳过面板并输出 WARN，绝不退化为 Namespace 全量查询；
 - 不同环境 cAdvisor/Java 标签结构差异较大，`containerMatchers` 必须根据目标 Prometheus 真实标签确认；
-- Grafana 11.4 / 真实 Prometheus 的导入与查询验证必须在目标环境执行；没有真实 URL 时不能把 `generate` 或 `--skip-prometheus` 视为环境验收通过。
+- 目标 Grafana（当前参考环境为 13.0.12）的导入、变量切换和 Node Graph 验证必须在实际环境执行；没有真实 URL 时不能把 `generate`、`--skip-prometheus` 或静态查询校验视为环境验收通过。
+
+### V1.0.5 迁移提示
+
+- 重新生成 Dashboard；新增「应用 APM 分析」「服务调用拓扑」「应用实例与 Endpoint」行，行顺序调整为：概览、HTTP、APM、拓扑、实例/Endpoint、JVM、Kubernetes、依赖组件。
+- 删除 Dashboard 的 `jvm_pod` 变量；JVM 面板按 application + namespace 聚合。Kubernetes 的 `k8s_pod` 保留。
+- `k8s_pod` 变量的 `query` 改为对象 `{"qryType":3,...}`，并且 `query_result(...)` 必须压成单行。Grafana 的变量解析正则没有 `s` 标志，多行表达式会被误判为 Series Query 并提交到 `/api/v1/series` 的 `match[]`。旧 Dashboard 必须重新生成。
+- 应用可配置 `skywalking.enabled`；未设置时 `service` 非空仍视为启用。
+- 工具配置新增 `prometheus.skywalkingUrl` 和 `datasources.*`；`spec.links` 新增 Service/实例/Endpoint/Trace Dashboard 基地址。
+- 删除“SkyWalking 服务映射与下钻”和“YAML 配置依赖”静态文本面板；服务拓扑只保留真实 Node Graph。
+- 删除“依赖组件与下钻”的详细静态清单；组件状态仍在总览，专业 Dashboard 通过精简导航链接进入。
+- Dashboard 标题和 Blackbox 面板标题包含域名 URL，避免域名上下文丢失。
+- 生产环境 UID 不写入模板；由 `sitegen.yaml`/环境变量或导入 Grafana 后选择。
+- SkyWalking 原生 Node Graph 只能通过 SkyWalking 数据源验证；`check` 会明确保留 `[WARN]` 直到在目标 Grafana 完成导入验证。
 
 ### V1.0.4 迁移提示
 

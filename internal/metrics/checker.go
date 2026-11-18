@@ -837,7 +837,7 @@ func matcherMatches(labelSet model.LabelSet, matcher config.LabelMatcher) bool {
 
 func (c *Checker) variableTasks() []checkTask {
 	var tasks []checkTask
-	for _, profileID := range []string{"jvm", "kubernetes"} {
+	for _, profileID := range []string{"kubernetes"} {
 		expression, err := BuildPodVariableExpression(c.Site, profileID, ProfileSelectorVar(profileID))
 		if err != nil {
 			tasks = append(tasks, c.failTask("Dashboard 变量", ProfilePodVar(profileID), err.Error()))

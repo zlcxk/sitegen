@@ -27,6 +27,10 @@ type Config struct {
 	BearerToken           string
 	TLSCAFile             string
 	TLSInsecureSkipVerify bool
+	// AllowPath permits a non-root base path, e.g. a Grafana datasource proxy
+	// (/api/datasources/uid/<uid>/resources). The business endpoint keeps the
+	// strict root-only policy.
+	AllowPath bool
 }
 
 // Client is a small, timeout-aware Prometheus API wrapper.
@@ -39,7 +43,7 @@ type Client struct {
 // to any host other than the configured endpoint are rejected, so credentials
 // cannot be forwarded through a cross-host redirect.
 func NewClient(cfg Config) (*Client, error) {
-	if err := validateEndpoint(cfg.URL); err != nil {
+	if err := validateEndpoint(cfg.URL, cfg.AllowPath); err != nil {
 		return nil, err
 	}
 	if cfg.Timeout <= 0 {
@@ -264,7 +268,7 @@ func IsEmpty(value model.Value) bool {
 	}
 }
 
-func validateEndpoint(raw string) error {
+func validateEndpoint(raw string, allowPath bool) error {
 	if strings.TrimSpace(raw) == "" {
 		return fmt.Errorf("Prometheus URL 不能为空（可通过 --prometheus-url 或 SITEGEN_PROMETHEUS_URL 设置）")
 	}
@@ -284,7 +288,7 @@ func validateEndpoint(raw string) error {
 	if u.RawQuery != "" || u.Fragment != "" {
 		return fmt.Errorf("Prometheus URL 不能包含 query 或 fragment")
 	}
-	if u.Path != "" && u.Path != "/" {
+	if !allowPath && u.Path != "" && u.Path != "/" {
 		return fmt.Errorf("Prometheus URL 不能包含路径，请填写服务根地址")
 	}
 	return nil

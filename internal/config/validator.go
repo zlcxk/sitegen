@@ -239,9 +239,15 @@ func Validate(site *Site, resolve Resolver) Issues {
 		validateSkywalkingUI(app.Skywalking.UI, base+".skywalking.ui", add)
 		validateApplicationKubernetes(app, base+".kubernetes", add)
 		if app.Skywalking.Service == "" {
-			add(SeverityError, base+".skywalking.service", "不能为空；留空时会自动生成 {application}_{namespace}")
+			if app.SkywalkingEnabled() {
+				add(SeverityError, base+".skywalking.service",
+					"启用 SkyWalking APM 时不能为空；留空时会自动生成 {application}_{namespace}")
+			}
 		} else if err := validateUTF8(app.Skywalking.Service); err != nil {
 			add(SeverityError, base+".skywalking.service", "%v", err)
+		} else if err := validateVariableLabelValue(app.Skywalking.Service); err != nil {
+			add(SeverityError, base+".skywalking.service",
+				"%v；SkyWalking Service 会进入 Grafana 变量和 PromQL 字符串", err)
 		} else if first, ok := services[app.Skywalking.Service]; ok {
 			add(SeverityError, base+".skywalking.service", "SkyWalking Service %q 已映射到 %s；不允许重复映射", app.Skywalking.Service, first)
 		} else {
@@ -596,6 +602,26 @@ func (l Links) Validate(path string, add func(Severity, string, string, ...any))
 			anyIssue = true
 		}
 	}
+	for _, link := range []struct {
+		name string
+		raw  string
+	}{
+		{"skywalkingInstanceDashboard", l.SkywalkingInstanceDashboard},
+		{"skywalkingEndpointDashboard", l.SkywalkingEndpointDashboard},
+		{"skywalkingTraceDashboard", l.SkywalkingTraceDashboard},
+		{"skywalkingServiceDashboard", l.SkywalkingServiceDashboard},
+	} {
+		if link.raw == "" {
+			continue
+		}
+		if strings.HasPrefix(link.raw, "d/") || strings.HasPrefix(link.raw, "/d/") {
+			continue
+		}
+		if err := validateHTTPURL(link.raw, true); err != nil {
+			add(SeverityError, path+"."+link.name, "%v", err)
+			anyIssue = true
+		}
+	}
 	templates := []struct {
 		name string
 		raw  string
@@ -633,6 +659,25 @@ func (l Links) Validate(path string, add func(Severity, string, string, ...any))
 		}
 		if !uidRE.MatchString(uid) {
 			add(SeverityError, path+".componentDashboards."+typ, "Grafana Dashboard UID 非法（1-40 位字母、数字、下划线或连字符）")
+			anyIssue = true
+		}
+	}
+	for index, dashboard := range l.Dashboards {
+		dashboardPath := fmt.Sprintf("%s.dashboards[%d]", path, index)
+		if strings.TrimSpace(dashboard.Title) == "" {
+			add(SeverityError, dashboardPath+".title", "不能为空")
+			anyIssue = true
+		}
+		if strings.TrimSpace(dashboard.URL) == "" {
+			add(SeverityError, dashboardPath+".url", "不能为空")
+			anyIssue = true
+			continue
+		}
+		if strings.HasPrefix(dashboard.URL, "d/") || strings.HasPrefix(dashboard.URL, "/d/") {
+			continue
+		}
+		if err := validateHTTPURL(dashboard.URL, true); err != nil {
+			add(SeverityError, dashboardPath+".url", "%v", err)
 			anyIssue = true
 		}
 	}

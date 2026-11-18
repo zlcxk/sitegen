@@ -1,16 +1,15 @@
 package dashboard
 
 import (
-	"fmt"
 	"net/url"
 	"strings"
 
 	"site-observability/internal/config"
 )
 
-func buildDashboardLinks(links config.Links) []DashboardLink {
+func buildDashboardLinks(site *config.Site, links config.Links) []DashboardLink {
 	var out []DashboardLink
-	add := func(title, raw string) {
+	add := func(title, raw string, keepTime bool) {
 		if raw == "" {
 			return
 		}
@@ -18,7 +17,7 @@ func buildDashboardLinks(links config.Links) []DashboardLink {
 			AsDropdown:  false,
 			Icon:        "external link",
 			IncludeVars: false,
-			KeepTime:    false,
+			KeepTime:    keepTime,
 			Tags:        []string{},
 			TargetBlank: true,
 			Title:       title,
@@ -27,9 +26,92 @@ func buildDashboardLinks(links config.Links) []DashboardLink {
 			URL:         raw,
 		})
 	}
-	add("SkyWalking", links.Skywalking)
-	add("Prometheus", links.Prometheus)
-	add("Grafana", links.Grafana)
+	add("SkyWalking", links.Skywalking, false)
+	add("Prometheus", links.Prometheus, false)
+	add("Grafana", links.Grafana, false)
+	if siteHasSkywalking(site) && links.SkywalkingServiceDashboard != "" {
+		raw := grafanaQueryLink(links.SkywalkingServiceDashboard, map[string]string{
+			"var-service":       "${service:queryparam}",
+			"var-layer":         "${layer}",
+			"var-DS_Prometheus": "${skywalking_prometheus}",
+			"var-DS_Skywalking": "${skywalking_datasource}",
+		}, "")
+		add("SkyWalking 服务详情", raw, true)
+	}
+	for _, dashboard := range links.Dashboards {
+		add(dashboard.Title, dashboard.URL, true)
+	}
+	return out
+}
+
+// dataLinks builds per-row SkyWalking drill-down links. Grafana field tokens
+// (${__field.labels.*}) and variable tokens are preserved; concrete values are
+// encoded with net/url. Missing dashboard bases produce no link, never a fake
+// URL.
+func (b *builder) dataLinks(targets []string) []DataLink {
+	var out []DataLink
+	for _, target := range targets {
+		switch target {
+		case "instance":
+			if raw := grafanaQueryLink(b.links.SkywalkingInstanceDashboard, map[string]string{
+				"var-service":          "${service:queryparam}",
+				"var-service_instance": "${__field.labels.service_instance}",
+			}, ""); raw != "" {
+				out = append(out, DataLink{Title: "实例详情", URL: raw})
+			}
+		case "endpoint":
+			if raw := grafanaQueryLink(b.links.SkywalkingEndpointDashboard, map[string]string{
+				"var-service":  "${service:queryparam}",
+				"var-endpoint": "${__field.labels.endpoint}",
+			}, "${__url_time_range}"); raw != "" {
+				out = append(out, DataLink{Title: "Endpoint 详情", URL: raw})
+			}
+		case "trace":
+			if raw := grafanaQueryLink(b.links.SkywalkingTraceDashboard, map[string]string{
+				"var-service":  "${service:queryparam}",
+				"var-endpoint": "${__field.labels.endpoint}",
+			}, "${__url_time_range}"); raw != "" {
+				out = append(out, DataLink{Title: "Trace 查询", URL: raw, TargetBlank: true})
+			}
+		}
+	}
+	return out
+}
+
+// grafanaQueryLink encodes static query parameters with net/url while keeping
+// Grafana variable tokens intact. rawSuffix is appended as a raw query fragment
+// (for example ${__url_time_range}).
+func grafanaQueryLink(base string, params map[string]string, rawSuffix string) string {
+	if strings.TrimSpace(base) == "" {
+		return ""
+	}
+	u, err := url.Parse(base)
+	if err != nil || u.Path == "" {
+		return ""
+	}
+	query := u.Query()
+	replacements := map[string]string{}
+	for key, value := range params {
+		if strings.Contains(value, "${") {
+			marker := "__SITEGEN_" + key + "__"
+			query.Set(key, marker)
+			replacements[marker] = value
+			continue
+		}
+		query.Set(key, value)
+	}
+	u.RawQuery = query.Encode()
+	out := u.String()
+	for marker, value := range replacements {
+		out = strings.ReplaceAll(out, marker, value)
+	}
+	if rawSuffix != "" {
+		if strings.Contains(out, "?") {
+			out += "&" + rawSuffix
+		} else {
+			out += "?" + rawSuffix
+		}
+	}
 	return out
 }
 
@@ -43,158 +125,39 @@ func componentDashboardURL(links config.Links, component config.Component) strin
 	}
 	base := strings.TrimRight(links.Grafana, "/")
 	values := url.Values{}
-	values.Set("var-component", component.Name)
-	if component.Prometheus.Job != "" {
-		values.Set("var-job", component.Prometheus.Job)
-	}
-	if component.Prometheus.Instance != "" {
-		values.Set("var-instance", component.Prometheus.Instance)
+	params := links.ComponentDashboardParams[component.Type]
+	if len(params) > 0 {
+		replacer := strings.NewReplacer(
+			"{instance}", component.Prometheus.Instance,
+			"{host}", componentHost(component.Prometheus.Instance),
+			"{job}", component.Prometheus.Job,
+			"{component}", component.Name,
+			"{type}", component.Type,
+		)
+		for key, template := range params {
+			values.Set(key, replacer.Replace(template))
+		}
+	} else {
+		values.Set("var-component", component.Name)
+		if component.Prometheus.Job != "" {
+			values.Set("var-job", component.Prometheus.Job)
+		}
+		if component.Prometheus.Instance != "" {
+			values.Set("var-instance", component.Prometheus.Instance)
+		}
 	}
 	return base + "/d/" + url.PathEscape(uid) + "?" + values.Encode()
 }
 
-func buildServicePanels(site *config.Site, links config.Links) []Panel {
-	if len(site.Spec.Applications) == 0 {
-		return nil
+func componentHost(instance string) string {
+	value := instance
+	if index := strings.Index(value, "://"); index >= 0 {
+		value = value[index+3:]
 	}
-	lines := []string{"### SkyWalking 服务映射", ""}
-	anyBase, anyServiceTemplate, anyEndpointTemplate := false, false, false
-	for _, app := range site.Spec.Applications {
-		resolved := resolveSkywalkingLinks(links, app)
-		if resolved.baseURL != "" {
-			anyBase = true
-		}
-		if resolved.serviceTemplate != "" {
-			anyServiceTemplate = true
-		}
-		if resolved.endpointTemplate != "" {
-			anyEndpointTemplate = true
-		}
-		line := fmt.Sprintf("- `%s/%s` → SkyWalking Service `%s`",
-			markdownCode(app.Application), markdownCode(app.Namespace), markdownCode(app.Skywalking.Service))
-		if resolved.serviceTemplate != "" {
-			if serviceURL := expandSkywalkingURL(resolved.serviceTemplate, site, app); serviceURL != "" {
-				line += " · " + markdownLink("Service 页面", serviceURL)
-			}
-		} else if resolved.baseURL != "" {
-			line += " · " + markdownLink("SkyWalking UI", resolved.baseURL) + "（未配置 Service URL 模板）"
-		}
-		lines = append(lines, line)
-		if resolved.endpointTemplate != "" {
-			if endpointURL := expandSkywalkingURL(resolved.endpointTemplate, site, app); endpointURL != "" {
-				lines = append(lines, "  - "+markdownLink("Endpoint 页面", endpointURL))
-			}
-		}
+	if index := strings.LastIndex(value, ":"); index > 0 {
+		value = value[:index]
 	}
-	if !anyBase && !anyServiceTemplate && !anyEndpointTemplate {
-		lines = append(lines,
-			"未配置 SkyWalking UI 地址。以下是 YAML 中声明的 Prometheus 应用与 SkyWalking Service 映射关系；配置 `spec.links.skywalking` 或应用的 `skywalking.ui` 后可从这里下钻。", "")
-	}
-	if !anyServiceTemplate {
-		lines = append(lines, "", "未配置 Service URL 模板（`skywalkingServiceURLTemplate` 或应用级 `skywalking.ui.serviceURLTemplate`）；不会把 SkyWalking 首页伪装成具体 Service 页面。")
-	}
-	if !anyEndpointTemplate {
-		lines = append(lines, "", "未配置 Endpoint URL 模板（`skywalkingEndpointURLTemplate` 或应用级 `skywalking.ui.endpointURLTemplate`）；不会生成 Endpoint 专属链接，请从 SkyWalking Service 页面进入 Endpoint 排行。")
-	}
-	if format := defaultEndpointFormat(site); format != "" {
-		lines = append(lines, "", "YAML 声明的 Endpoint 维度格式：`"+markdownCode(format)+"`")
-	}
-	panels := []Panel{textPanel("SkyWalking 服务映射与下钻", strings.Join(lines, "\n"))}
-
-	if depLines := explicitDependencyLines(site); len(depLines) > 0 {
-		content := "### YAML 显式依赖（配置关系，非 SkyWalking 实测拓扑）\n\n" +
-			strings.Join(depLines, "\n") +
-			"\n\n本 Dashboard 不伪造调用拓扑；实际调用关系请以 SkyWalking 服务拓扑和 Trace 为准。"
-		panels = append(panels, textPanel("YAML 配置依赖", content))
-	}
-	return panels
-}
-
-type resolvedSkywalkingLinks struct {
-	baseURL          string
-	serviceTemplate  string
-	endpointTemplate string
-}
-
-// resolveSkywalkingLinks prefers application-specific UI configuration and
-// falls back to the global tool configuration.
-func resolveSkywalkingLinks(global config.Links, app config.Application) resolvedSkywalkingLinks {
-	out := resolvedSkywalkingLinks{
-		baseURL:          global.Skywalking,
-		serviceTemplate:  global.SkywalkingServiceURLTemplate,
-		endpointTemplate: global.SkywalkingEndpointURLTemplate,
-	}
-	ui := app.Skywalking.UI
-	if ui.BaseURL != "" {
-		out.baseURL = ui.BaseURL
-	}
-	if ui.ServiceURLTemplate != "" {
-		out.serviceTemplate = ui.ServiceURLTemplate
-	}
-	if ui.EndpointURLTemplate != "" {
-		out.endpointTemplate = ui.EndpointURLTemplate
-	}
-	return out
-}
-
-func explicitDependencyLines(site *config.Site) []string {
-	labels := map[string]string{}
-	for _, app := range site.Spec.Applications {
-		labels[app.ID] = app.Application + "/" + app.Namespace
-	}
-	for _, component := range site.Spec.Components {
-		labels[component.ID] = component.Name
-	}
-	var lines []string
-	for _, app := range site.Spec.Applications {
-		if len(app.Dependencies) == 0 {
-			continue
-		}
-		var deps []string
-		for _, dep := range app.Dependencies {
-			label := labels[dep]
-			if label == "" {
-				label = dep
-			}
-			deps = append(deps, markdownCode(label))
-		}
-		lines = append(lines, "- `"+markdownCode(app.Application+"/"+app.Namespace)+"` → "+strings.Join(deps, ", "))
-	}
-	return lines
-}
-
-func defaultEndpointFormat(site *config.Site) string {
-	if len(site.Spec.Applications) == 0 {
-		return ""
-	}
-	format := site.Spec.Applications[0].Skywalking.EndpointFormat
-	for _, app := range site.Spec.Applications[1:] {
-		if app.Skywalking.EndpointFormat != format {
-			return ""
-		}
-	}
-	return format
-}
-
-func expandSkywalkingURL(template string, site *config.Site, app config.Application) string {
-	if template == "" {
-		return ""
-	}
-	replacer := strings.NewReplacer(
-		"{service}", url.QueryEscape(app.Skywalking.Service),
-		"{application}", url.QueryEscape(app.Application),
-		"{namespace}", url.QueryEscape(app.Namespace),
-		"{site}", url.QueryEscape(site.Metadata.ID),
-	)
-	return replacer.Replace(template)
-}
-
-func markdownLink(label, raw string) string {
-	if raw == "" {
-		return ""
-	}
-	safe := strings.NewReplacer(" ", "%20", "<", "%3C", ">", "%3E").Replace(raw)
-	return "[" + label + "](<" + safe + ">)"
+	return value
 }
 
 func markdownCode(value string) string {

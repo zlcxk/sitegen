@@ -26,9 +26,14 @@ func validateProfile(p *Profile) error {
 		return fmt.Errorf("profile %s: target %q 非法（application/component/domain）", p.ID, p.Target)
 	}
 	switch p.Scope {
-	case ScopeApplication, ScopeNamespace, ScopeComponent, ScopeDomain, ScopeJob:
+	case ScopeApplication, ScopeNamespace, ScopeComponent, ScopeDomain, ScopeJob, ScopeSkywalking:
 	default:
 		return fmt.Errorf("profile %s: scope %q 非法", p.ID, p.Scope)
+	}
+	switch p.Datasource {
+	case "", "business", "skywalking_prometheus", "skywalking_datasource":
+	default:
+		return fmt.Errorf("profile %s: datasource %q 非法", p.ID, p.Datasource)
 	}
 	if p.Target != targetComponent && len(p.ComponentTypes) > 0 {
 		return fmt.Errorf("profile %s: 只有 component profile 可以配置 componentTypes", p.ID)
@@ -57,7 +62,14 @@ func validateProfile(p *Profile) error {
 		if strings.TrimSpace(pn.Name) == "" {
 			return fmt.Errorf("%s: name 不能为空", path)
 		}
-		if strings.TrimSpace(pn.Query) == "" {
+		if pn.Panel == "nodeGraph" {
+			if pn.NodeGraph == nil {
+				return fmt.Errorf("%s: nodeGraph 面板必须配置 nodeGraph.nodeMetrics/edgeMetrics", path)
+			}
+			if strings.TrimSpace(pn.NodeGraph.NodeMetrics) == "" || strings.TrimSpace(pn.NodeGraph.EdgeMetrics) == "" {
+				return fmt.Errorf("%s: nodeGraph.nodeMetrics/edgeMetrics 不能为空", path)
+			}
+		} else if strings.TrimSpace(pn.Query) == "" {
 			return fmt.Errorf("%s: query 不能为空", path)
 		}
 		if strings.TrimSpace(pn.Unit) == "" {
@@ -65,6 +77,18 @@ func validateProfile(p *Profile) error {
 		}
 		if !allowedPanelTypes[pn.Panel] {
 			return fmt.Errorf("%s: panel 类型 %q 非法", path, pn.Panel)
+		}
+		switch pn.Datasource {
+		case "", "business", "skywalking_prometheus", "skywalking_datasource":
+		default:
+			return fmt.Errorf("%s: datasource %q 非法", path, pn.Datasource)
+		}
+		for _, target := range pn.LinkTargets {
+			switch target {
+			case "instance", "endpoint", "trace":
+			default:
+				return fmt.Errorf("%s: linkTargets %q 非法（instance/endpoint/trace）", path, target)
+			}
 		}
 		switch pn.Aggregation {
 		case "", AggregationApplication:
@@ -88,7 +112,8 @@ func validateProfile(p *Profile) error {
 			}
 			seenSections[section] = true
 		}
-		if p.Scope != ScopeJob && !strings.Contains(pn.Query, "%SELECTOR%") {
+		if pn.Panel != "nodeGraph" && p.Scope != ScopeJob && p.Scope != ScopeSkywalking &&
+			!strings.Contains(pn.Query, "%SELECTOR%") {
 			return fmt.Errorf("%s: query 缺少 %%SELECTOR%% 占位符", path)
 		}
 		for _, token := range tokenRE.FindAllString(pn.Query, -1) {

@@ -3,25 +3,31 @@ Site Observability 校验报告
 
 站点: 管理后台站点 (admin-dev)
 配置文件: sites/admin.yaml
-模板版本: 1.0.0+98da00eefc3bd3ce
-生成时间: 2026-11-18T16:25:56+08:00
+模板版本: 1.0.0+55d5d9f0e1b0cce4
+生成时间: 2026-11-18T18:12:53+08:00
 Dashboard: 未生成
 
 检查摘要
 --------
-未发现需要优先处理的根因。
+需要处理的主要问题：
+1. SkyWalking APM 当前无数据：user-center-application-dev
+2. SkyWalking 原生拓扑尚未在 Grafana 验证
 
 检查结果
 --------
-[PASS] 模板 / 指标模板注册表: 版本 1.0.0，摘要 98da00eefc3bd3ce
+[PASS] 模板 / 指标模板注册表: 版本 1.0.0，摘要 55d5d9f0e1b0cce4
 [WARN] 配置 / spec.applications[0].kubernetes.podSelector: pod-regex 兼容模式依赖 Pod 名称；Deployment 滚动更新后名称会变化，请确保正则能覆盖新实例
 [WARN] 配置 / spec.applications[1].kubernetes.podSelector: pod-regex 兼容模式依赖 Pod 名称；Deployment 滚动更新后名称会变化，请确保正则能覆盖新实例
-[PASS] Dashboard 变量 / 变量模型: Profile 应用变量为单选 custom，2 个 Pod 变量使用 query_result，AllValue 与数据源绑定合法
-[PASS] Dashboard 变量 / http_app_selector: 单选 custom 变量，包含 1 个应用选项
-[PASS] Dashboard 变量 / jvm_app_selector: 单选 custom 变量，包含 2 个应用选项
-[PASS] Dashboard 变量 / jvm_pod 定义: query_result 查询，regexApplyTo=value，AllValue=.*
-[PASS] Dashboard 变量 / k8s_app_selector: 单选 custom 变量，包含 2 个应用选项
-[PASS] Dashboard 变量 / k8s_pod 定义: query_result 查询，regexApplyTo=value，AllValue=.*
+[PASS] Dashboard 变量 / 变量模型: Profile 应用变量为单选 custom，1 个 Pod 变量使用 query_result，AllValue 与数据源绑定合法
+[PASS] Dashboard 变量 / datasource: datasource 变量，类型 prometheus
+[PASS] Dashboard 变量 / http_app_selector: 单选 custom 变量，包含 1 个选项
+[PASS] Dashboard 变量 / jvm_app_selector: 单选 custom 变量，包含 2 个选项
+[PASS] Dashboard 变量 / k8s_app_selector: 单选 custom 变量，包含 2 个选项
+[PASS] Dashboard 变量 / k8s_pod 定义: query_result 查询（qryType=3，单行），regexApplyTo=value，AllValue=.*
+[PASS] Dashboard 变量 / skywalking_prometheus: datasource 变量，类型 prometheus
+[PASS] Dashboard 变量 / skywalking_datasource: datasource 变量，类型 apache-skywalking-datasource
+[PASS] Dashboard 变量 / service: 单选 custom 变量，包含 2 个选项
+[PASS] Dashboard 变量 / layer: 单选 custom 变量，包含 1 个选项
 [PASS] Dashboard 变量 / Pod Matcher: 未发现 :json 或未加引号的正则变量；静态 Pod 归属与动态 Pod 选择分别生成
 [WARN] Dashboard 变量 / Grafana 实际插值: 尚未在目标 Grafana 中导入并切换应用/Pod；当前仅完成生成模型与 Prometheus 展开查询校验
 [PASS] Prometheus / 连通性: 查询 API 可访问
@@ -39,19 +45,19 @@ Dashboard: 未生成
        必需标签齐全
 [PASS] PromQL / Blackbox/admin/blackbox-availability: 表达式合法且返回数据
 [PASS] PromQL / Blackbox/admin/blackbox-duration: 表达式合法且返回数据
-[PASS] Prometheus / 应用 rtd-admin-dev/http_server_requests_seconds_bucket: 匹配序列：1794；存在 application 标签：1794；存在 job 标签：1794；存在 method 标签：1794；存在 namespace 标签：1794；存在 uri 标签：1794
+[PASS] Prometheus / 应用 rtd-admin-dev/http_server_requests_seconds_bucket: 匹配序列：4071；存在 application 标签：4071；存在 job 标签：4071；存在 method 标签：4071；存在 namespace 标签：4071；存在 uri 标签：4071
        
        实际 Selector:
        application="rtd-admin", namespace="dev", job="rtd-admin"
        
        必需标签齐全
-[PASS] Prometheus / 应用 rtd-admin-dev/http_server_requests_seconds_count: 匹配序列：26；存在 application 标签：26；存在 job 标签：26；存在 method 标签：26；存在 namespace 标签：26；存在 status 标签：26；存在 uri 标签：26
+[PASS] Prometheus / 应用 rtd-admin-dev/http_server_requests_seconds_count: 匹配序列：59；存在 application 标签：59；存在 job 标签：59；存在 method 标签：59；存在 namespace 标签：59；存在 status 标签：59；存在 uri 标签：59
        
        实际 Selector:
        application="rtd-admin", namespace="dev", job="rtd-admin"
        
        必需标签齐全
-[PASS] Prometheus / 应用 rtd-admin-dev/http_server_requests_seconds_sum: 匹配序列：26；存在 application 标签：26；存在 job 标签：26；存在 namespace 标签：26
+[PASS] Prometheus / 应用 rtd-admin-dev/http_server_requests_seconds_sum: 匹配序列：59；存在 application 标签：59；存在 job 标签：59；存在 namespace 标签：59
        
        实际 Selector:
        application="rtd-admin", namespace="dev", job="rtd-admin"
@@ -69,45 +75,88 @@ Dashboard: 未生成
 [WARN] PromQL / 应用/rtd-admin-dev/http/http-slow-endpoints: 查询表达式合法，但当前时间窗口无数据
 [PASS] PromQL / 应用/rtd-admin-dev/http/http-top-endpoints: 表达式合法且返回数据
 [PASS] PromQL / 应用/rtd-admin-dev/http/http-rps-by-method: 表达式合法且返回数据
-[PASS] Prometheus / 应用 rtd-admin-dev/jvm_memory_used_bytes: 匹配序列：8；存在 application 标签：8；存在 area 标签：8；存在 job 标签：8；存在 namespace 标签：8；存在 pod 标签：8；可选 id 标签：8
+[PASS] Prometheus / 应用 rtd-admin-dev/jvm_gc_pause_seconds_count: 匹配序列：4；存在 application 标签：4；存在 job 标签：4；存在 namespace 标签：4
        
        实际 Selector:
        application="rtd-admin", namespace="dev", job="rtd-admin"
        
        必需标签齐全
-[PASS] PromQL / 应用/rtd-admin-dev/jvm/jvm-heap-by-pod: 表达式合法且返回数据
+[PASS] Prometheus / 应用 rtd-admin-dev/jvm_gc_pause_seconds_sum: 匹配序列：4；存在 application 标签：4；存在 job 标签：4；存在 namespace 标签：4
+       
+       实际 Selector:
+       application="rtd-admin", namespace="dev", job="rtd-admin"
+       
+       必需标签齐全
+[PASS] Prometheus / 应用 rtd-admin-dev/jvm_memory_max_bytes: 匹配序列：8；存在 application 标签：8；存在 area 标签：8；存在 job 标签：8；存在 namespace 标签：8
+       
+       实际 Selector:
+       application="rtd-admin", namespace="dev", job="rtd-admin"
+       
+       必需标签齐全
+[PASS] Prometheus / 应用 rtd-admin-dev/jvm_memory_used_bytes: 匹配序列：8；存在 application 标签：8；存在 area 标签：8；存在 job 标签：8；存在 namespace 标签：8；可选 id 标签：8
+       
+       实际 Selector:
+       application="rtd-admin", namespace="dev", job="rtd-admin"
+       
+       必需标签齐全
+[PASS] Prometheus / 应用 rtd-admin-dev/jvm_threads_live_threads: 匹配序列：1；存在 application 标签：1；存在 job 标签：1；存在 namespace 标签：1
+       
+       实际 Selector:
+       application="rtd-admin", namespace="dev", job="rtd-admin"
+       
+       必需标签齐全
+[PASS] Prometheus / 应用 rtd-admin-dev/process_cpu_usage: 匹配序列：1；存在 application 标签：1；存在 job 标签：1；存在 namespace 标签：1
+       
+       实际 Selector:
+       application="rtd-admin", namespace="dev", job="rtd-admin"
+       
+       必需标签齐全
+[PASS] Prometheus / 应用 rtd-admin-dev/process_uptime_seconds: 匹配序列：1；存在 application 标签：1；存在 job 标签：1；存在 namespace 标签：1
+       
+       实际 Selector:
+       application="rtd-admin", namespace="dev", job="rtd-admin"
+       
+       必需标签齐全
+[PASS] PromQL / 应用/rtd-admin-dev/jvm/jvm-heap: 表达式合法且返回数据
+[PASS] PromQL / 应用/rtd-admin-dev/jvm/jvm-heap-usage: 表达式合法且返回数据
+[PASS] PromQL / 应用/rtd-admin-dev/jvm/jvm-nonheap: 表达式合法且返回数据
 [PASS] PromQL / 应用/rtd-admin-dev/jvm/jvm-heap-by-pool: 表达式合法且返回数据
-[PASS] Prometheus / 应用 rtd-admin-dev/container_cpu_cfs_periods_total: 匹配序列：96；存在 namespace 标签：96；存在 pod 标签：96；可选 container 标签：51
+[PASS] PromQL / 应用/rtd-admin-dev/jvm/jvm-gc-rate: 表达式合法且返回数据
+[PASS] PromQL / 应用/rtd-admin-dev/jvm/jvm-gc-pause: 表达式合法且返回数据
+[PASS] PromQL / 应用/rtd-admin-dev/jvm/jvm-threads: 表达式合法且返回数据
+[PASS] PromQL / 应用/rtd-admin-dev/jvm/jvm-process-cpu: 表达式合法且返回数据
+[PASS] PromQL / 应用/rtd-admin-dev/jvm/jvm-uptime: 表达式合法且返回数据
+[PASS] Prometheus / 应用 rtd-admin-dev/container_cpu_cfs_periods_total: 匹配序列：77；存在 namespace 标签：77；存在 pod 标签：77；可选 container 标签：39
        
        实际 Selector:
        namespace="dev"
        
        必需标签齐全
-[PASS] Prometheus / 应用 rtd-admin-dev/container_cpu_cfs_throttled_periods_total: 匹配序列：96；存在 namespace 标签：96；存在 pod 标签：96；可选 container 标签：51
+[PASS] Prometheus / 应用 rtd-admin-dev/container_cpu_cfs_throttled_periods_total: 匹配序列：77；存在 namespace 标签：77；存在 pod 标签：77；可选 container 标签：39
        
        实际 Selector:
        namespace="dev"
        
        必需标签齐全
-[PASS] Prometheus / 应用 rtd-admin-dev/container_cpu_usage_seconds_total: 匹配序列：143；存在 namespace 标签：143；存在 pod 标签：143；可选 container 标签：51
+[PASS] Prometheus / 应用 rtd-admin-dev/container_cpu_usage_seconds_total: 匹配序列：117；存在 namespace 标签：117；存在 pod 标签：117；可选 container 标签：39
        
        实际 Selector:
        namespace="dev"
        
        必需标签齐全
-[PASS] Prometheus / 应用 rtd-admin-dev/container_memory_working_set_bytes: 匹配序列：143；存在 namespace 标签：143；存在 pod 标签：143；可选 container 标签：51
+[PASS] Prometheus / 应用 rtd-admin-dev/container_memory_working_set_bytes: 匹配序列：117；存在 namespace 标签：117；存在 pod 标签：117；可选 container 标签：39
        
        实际 Selector:
        namespace="dev"
        
        必需标签齐全
-[PASS] Prometheus / 应用 rtd-admin-dev/kube_pod_info: 匹配序列：48；存在 namespace 标签：48；存在 node 标签：48；存在 pod 标签：48
+[PASS] Prometheus / 应用 rtd-admin-dev/kube_pod_info: 匹配序列：39；存在 namespace 标签：39；存在 node 标签：39；存在 pod 标签：39
        
        实际 Selector:
        namespace="dev"
        
        必需标签齐全
-[PASS] Prometheus / 应用 rtd-admin-dev/kube_pod_status_phase: 匹配序列：230；存在 namespace 标签：230；存在 phase 标签：230；存在 pod 标签：230
+[PASS] Prometheus / 应用 rtd-admin-dev/kube_pod_status_phase: 匹配序列：195；存在 namespace 标签：195；存在 phase 标签：195；存在 pod 标签：195
        
        实际 Selector:
        namespace="dev"
@@ -119,51 +168,94 @@ Dashboard: 未生成
 [PASS] PromQL / 应用/rtd-admin-dev/kubernetes/cpu-throttling: 表达式合法且返回数据
 [PASS] PromQL / 应用/rtd-admin-dev/kubernetes/pod-status: 表达式合法且返回数据
 [PASS] PromQL / 应用/rtd-admin-dev/kubernetes/pod-node-distribution: 表达式合法且返回数据
-[PASS] Prometheus / Namespace/dev: Namespace "dev" 存在，kube_pod_info 序列 48 条
+[PASS] Prometheus / Namespace/dev: Namespace "dev" 存在，kube_pod_info 序列 39 条
 [PASS] Prometheus / Kubernetes 指标/rtd-admin-dev/container_memory_working_set_bytes: 应用 Pod 序列 3 条，容器过滤后 1 条
 [PASS] Prometheus / Kubernetes 指标/rtd-admin-dev/container_cpu_usage_seconds_total: 应用 Pod 序列 3 条，容器过滤后 1 条
 [PASS] Prometheus / Kubernetes 指标/rtd-admin-dev/container_cpu_cfs_throttled_periods_total: 应用 Pod 序列 2 条，容器过滤后 1 条
 [PASS] Prometheus / Kubernetes 指标/rtd-admin-dev/container_cpu_cfs_periods_total: 应用 Pod 序列 2 条，容器过滤后 1 条
 [PASS] Prometheus / 容器过滤/rtd-admin-dev: 已核对 1 个过滤条件；应用 Pod 范围内 3 条序列，组合匹配 1 条
-[PASS] Prometheus / 应用 user-center-application-dev/jvm_memory_used_bytes: 匹配序列：8；存在 application 标签：8；存在 area 标签：8；存在 job 标签：8；存在 namespace 标签：8；存在 pod 标签：8；可选 id 标签：8
+[PASS] Prometheus / 应用 user-center-application-dev/jvm_gc_pause_seconds_count: 匹配序列：3；存在 application 标签：3；存在 job 标签：3；存在 namespace 标签：3
        
        实际 Selector:
        application="user-center-application", namespace="dev", job="user-center-application"
        
        必需标签齐全
-[PASS] PromQL / 应用/user-center-application-dev/jvm/jvm-heap-by-pod: 表达式合法且返回数据
+[PASS] Prometheus / 应用 user-center-application-dev/jvm_gc_pause_seconds_sum: 匹配序列：3；存在 application 标签：3；存在 job 标签：3；存在 namespace 标签：3
+       
+       实际 Selector:
+       application="user-center-application", namespace="dev", job="user-center-application"
+       
+       必需标签齐全
+[PASS] Prometheus / 应用 user-center-application-dev/jvm_memory_max_bytes: 匹配序列：8；存在 application 标签：8；存在 area 标签：8；存在 job 标签：8；存在 namespace 标签：8
+       
+       实际 Selector:
+       application="user-center-application", namespace="dev", job="user-center-application"
+       
+       必需标签齐全
+[PASS] Prometheus / 应用 user-center-application-dev/jvm_memory_used_bytes: 匹配序列：8；存在 application 标签：8；存在 area 标签：8；存在 job 标签：8；存在 namespace 标签：8；可选 id 标签：8
+       
+       实际 Selector:
+       application="user-center-application", namespace="dev", job="user-center-application"
+       
+       必需标签齐全
+[PASS] Prometheus / 应用 user-center-application-dev/jvm_threads_live_threads: 匹配序列：1；存在 application 标签：1；存在 job 标签：1；存在 namespace 标签：1
+       
+       实际 Selector:
+       application="user-center-application", namespace="dev", job="user-center-application"
+       
+       必需标签齐全
+[PASS] Prometheus / 应用 user-center-application-dev/process_cpu_usage: 匹配序列：1；存在 application 标签：1；存在 job 标签：1；存在 namespace 标签：1
+       
+       实际 Selector:
+       application="user-center-application", namespace="dev", job="user-center-application"
+       
+       必需标签齐全
+[PASS] Prometheus / 应用 user-center-application-dev/process_uptime_seconds: 匹配序列：1；存在 application 标签：1；存在 job 标签：1；存在 namespace 标签：1
+       
+       实际 Selector:
+       application="user-center-application", namespace="dev", job="user-center-application"
+       
+       必需标签齐全
+[PASS] PromQL / 应用/user-center-application-dev/jvm/jvm-heap: 表达式合法且返回数据
+[PASS] PromQL / 应用/user-center-application-dev/jvm/jvm-heap-usage: 表达式合法且返回数据
+[PASS] PromQL / 应用/user-center-application-dev/jvm/jvm-nonheap: 表达式合法且返回数据
 [PASS] PromQL / 应用/user-center-application-dev/jvm/jvm-heap-by-pool: 表达式合法且返回数据
-[PASS] Prometheus / 应用 user-center-application-dev/container_cpu_cfs_periods_total: 匹配序列：96；存在 namespace 标签：96；存在 pod 标签：96；可选 container 标签：51
+[PASS] PromQL / 应用/user-center-application-dev/jvm/jvm-gc-rate: 表达式合法且返回数据
+[PASS] PromQL / 应用/user-center-application-dev/jvm/jvm-gc-pause: 表达式合法且返回数据
+[PASS] PromQL / 应用/user-center-application-dev/jvm/jvm-threads: 表达式合法且返回数据
+[PASS] PromQL / 应用/user-center-application-dev/jvm/jvm-process-cpu: 表达式合法且返回数据
+[PASS] PromQL / 应用/user-center-application-dev/jvm/jvm-uptime: 表达式合法且返回数据
+[PASS] Prometheus / 应用 user-center-application-dev/container_cpu_cfs_periods_total: 匹配序列：77；存在 namespace 标签：77；存在 pod 标签：77；可选 container 标签：39
        
        实际 Selector:
        namespace="dev"
        
        必需标签齐全
-[PASS] Prometheus / 应用 user-center-application-dev/container_cpu_cfs_throttled_periods_total: 匹配序列：96；存在 namespace 标签：96；存在 pod 标签：96；可选 container 标签：51
+[PASS] Prometheus / 应用 user-center-application-dev/container_cpu_cfs_throttled_periods_total: 匹配序列：77；存在 namespace 标签：77；存在 pod 标签：77；可选 container 标签：39
        
        实际 Selector:
        namespace="dev"
        
        必需标签齐全
-[PASS] Prometheus / 应用 user-center-application-dev/container_cpu_usage_seconds_total: 匹配序列：143；存在 namespace 标签：143；存在 pod 标签：143；可选 container 标签：51
+[PASS] Prometheus / 应用 user-center-application-dev/container_cpu_usage_seconds_total: 匹配序列：117；存在 namespace 标签：117；存在 pod 标签：117；可选 container 标签：39
        
        实际 Selector:
        namespace="dev"
        
        必需标签齐全
-[PASS] Prometheus / 应用 user-center-application-dev/container_memory_working_set_bytes: 匹配序列：143；存在 namespace 标签：143；存在 pod 标签：143；可选 container 标签：51
+[PASS] Prometheus / 应用 user-center-application-dev/container_memory_working_set_bytes: 匹配序列：117；存在 namespace 标签：117；存在 pod 标签：117；可选 container 标签：39
        
        实际 Selector:
        namespace="dev"
        
        必需标签齐全
-[PASS] Prometheus / 应用 user-center-application-dev/kube_pod_info: 匹配序列：48；存在 namespace 标签：48；存在 node 标签：48；存在 pod 标签：48
+[PASS] Prometheus / 应用 user-center-application-dev/kube_pod_info: 匹配序列：39；存在 namespace 标签：39；存在 node 标签：39；存在 pod 标签：39
        
        实际 Selector:
        namespace="dev"
        
        必需标签齐全
-[PASS] Prometheus / 应用 user-center-application-dev/kube_pod_status_phase: 匹配序列：230；存在 namespace 标签：230；存在 phase 标签：230；存在 pod 标签：230
+[PASS] Prometheus / 应用 user-center-application-dev/kube_pod_status_phase: 匹配序列：195；存在 namespace 标签：195；存在 phase 标签：195；存在 pod 标签：195
        
        实际 Selector:
        namespace="dev"
@@ -211,9 +303,47 @@ Dashboard: 未生成
        
        必需标签齐全
 [PASS] PromQL / 组件/redis-dev/redis-basic/redis-up: 表达式合法且返回数据
-[PASS] Dashboard 变量 / jvm_pod: Pod 变量查询合法且返回数据
 [PASS] Dashboard 变量 / k8s_pod: Pod 变量查询合法且返回数据
 [SKIP] 指标模板 / user-center-application-dev/http: 站点未启用该指标模板
+[PASS] SkyWalking / 连通性: SkyWalking Prometheus 查询 API 可访问
+[PASS] SkyWalking / rtd-admin-dev/service_apdex: 服务 "rtd-admin_dev" 返回 service_apdex 数据（实际 Selector: layer="GENERAL", service="rtd-admin_dev"）
+[PASS] SkyWalking / rtd-admin-dev/service_sla: 服务 "rtd-admin_dev" 返回 service_sla 数据（实际 Selector: layer="GENERAL", service="rtd-admin_dev"）
+[PASS] SkyWalking / rtd-admin-dev/service_cpm: 服务 "rtd-admin_dev" 返回 service_cpm 数据（实际 Selector: layer="GENERAL", service="rtd-admin_dev"）
+[PASS] SkyWalking / rtd-admin-dev/service_resp_time: 服务 "rtd-admin_dev" 返回 service_resp_time 数据（实际 Selector: layer="GENERAL", service="rtd-admin_dev"）
+[PASS] SkyWalking / rtd-admin-dev/service_percentile: 服务 "rtd-admin_dev" 返回 service_percentile 数据（实际 Selector: layer="GENERAL", service="rtd-admin_dev"）
+[PASS] SkyWalking / rtd-admin-dev/service_instance_cpm: SkyWalking 实例/Endpoint 指标可查询
+[PASS] SkyWalking / rtd-admin-dev/service_instance_resp_time: SkyWalking 实例/Endpoint 指标可查询
+[PASS] SkyWalking / rtd-admin-dev/service_instance_sla: SkyWalking 实例/Endpoint 指标可查询
+[PASS] SkyWalking / rtd-admin-dev/endpoint_cpm: SkyWalking 实例/Endpoint 指标可查询
+[PASS] SkyWalking / rtd-admin-dev/endpoint_resp_time: SkyWalking 实例/Endpoint 指标可查询
+[PASS] SkyWalking / rtd-admin-dev/endpoint_sla: SkyWalking 实例/Endpoint 指标可查询
+[WARN] SkyWalking / user-center-application-dev/service_apdex: 服务 "user-center-application_dev" 在近 1h 内没有 service_apdex 数据
+       
+       实际 Selector:
+       layer="GENERAL", service="user-center-application_dev"
+[WARN] SkyWalking / user-center-application-dev/service_sla: 服务 "user-center-application_dev" 在近 1h 内没有 service_sla 数据
+       
+       实际 Selector:
+       layer="GENERAL", service="user-center-application_dev"
+[WARN] SkyWalking / user-center-application-dev/service_cpm: 服务 "user-center-application_dev" 在近 1h 内没有 service_cpm 数据
+       
+       实际 Selector:
+       layer="GENERAL", service="user-center-application_dev"
+[WARN] SkyWalking / user-center-application-dev/service_resp_time: 服务 "user-center-application_dev" 在近 1h 内没有 service_resp_time 数据
+       
+       实际 Selector:
+       layer="GENERAL", service="user-center-application_dev"
+[WARN] SkyWalking / user-center-application-dev/service_percentile: 服务 "user-center-application_dev" 在近 1h 内没有 service_percentile 数据
+       
+       实际 Selector:
+       layer="GENERAL", service="user-center-application_dev"
+[WARN] SkyWalking / user-center-application-dev/service_instance_cpm: 服务实例/Endpoint 指标当前没有数据
+[WARN] SkyWalking / user-center-application-dev/service_instance_resp_time: 服务实例/Endpoint 指标当前没有数据
+[WARN] SkyWalking / user-center-application-dev/service_instance_sla: 服务实例/Endpoint 指标当前没有数据
+[WARN] SkyWalking / user-center-application-dev/endpoint_cpm: 服务实例/Endpoint 指标当前没有数据
+[WARN] SkyWalking / user-center-application-dev/endpoint_resp_time: 服务实例/Endpoint 指标当前没有数据
+[WARN] SkyWalking / user-center-application-dev/endpoint_sla: 服务实例/Endpoint 指标当前没有数据
+[WARN] SkyWalking / 拓扑: SkyWalking 原生 Node Graph 需要在目标 Grafana 中验证；本检查只验证 SkyWalking Prometheus 指标
 
-汇总: PASS=77 WARN=8 FAIL=0 SKIP=1
+汇总: PASS=118 WARN=20 FAIL=0 SKIP=1
 结果: OK

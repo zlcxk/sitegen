@@ -29,6 +29,7 @@ spec:
           namespace: dev
 
       skywalking:
+        enabled: true
         service: rtd-admin_dev
         endpointFormat: "{method}:{uri}"
 
@@ -66,6 +67,7 @@ spec:
           namespace: dev
 
       skywalking:
+        enabled: true
         service: user-center-application_dev
         endpointFormat: "{method}:{uri}"
 
@@ -106,3 +108,34 @@ spec:
         instance: "redis://10.10.100.10:16379"
       metrics:
         - redis-basic
+
+  links:
+    grafana: "https://grafana-dev.rtdgo.tech"
+    # 目标 Grafana 中的 SkyWalking 实例 / Endpoint / Trace / Service Dashboard。
+    # 使用相对路径，生成器会统一编码参数；不要在其他模板中硬编码 UID。
+    skywalkingServiceDashboard: "d/ffhv7bsxmi48wd/skywalking-service"
+    skywalkingInstanceDashboard: "d/efigjuk3p9a0wc/skywalking-instance"
+    skywalkingEndpointDashboard: "d/bfigjdt9vx98ga/skywalking-endpoint"
+    skywalkingTraceDashboard: "d/ad2xd6l/eksen-skywalking-trace"
+
+    # 依赖组件专业 Dashboard。组件状态面板会带上对应实例参数。
+    componentDashboards:
+      mysql: "0D6dTg3Zk"
+      redis: "redis-exporter-overview"
+    componentDashboardParams:
+      mysql:
+        var-host: "{instance}"
+        var-node_host: "{host}"
+      redis:
+        var-instance: "{instance}"
+
+    # 额外专业 Dashboard 导航；不复制其面板，只提供下钻。
+    dashboards:
+      - title: "Kubernetes 集群"
+        url: "d/StarsL_cn_K8S/k8s-dashboard?var-NameSpace=dev"
+      - title: "Blackbox Prober"
+        url: "d/NEzutrbMk/blackbox-exporter-http-prober?var-job=blackbox-sites-dev&var-instance=https%3A%2F%2Fadmin-dev.rtdgo.tech"
+      - title: "MySQL Dev"
+        url: "d/0D6dTg3Zk/mysqld-exporter-dashboard?var-host=10.10.100.10%3A3306&var-node_host=10.10.100.10"
+      - title: "Redis Dev"
+        url: "d/redis-exporter-overview/redis?var-instance=redis%3A%2F%2F10.10.100.10%3A16379"

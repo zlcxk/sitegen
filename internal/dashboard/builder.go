@@ -14,21 +14,36 @@ import (
 
 const datasourceVarName = "datasource"
 const datasourceUID = "${datasource}"
+const skywalkingPrometheusVarName = "skywalking_prometheus"
+const skywalkingPrometheusUID = "${skywalking_prometheus}"
+const skywalkingDatasourceVarName = "skywalking_datasource"
+const skywalkingDatasourceUID = "${skywalking_datasource}"
+const skywalkingServiceVarName = "service"
+const skywalkingLayerVarName = "layer"
 
 type builder struct {
 	site           *config.Site
 	registry       *metrics.Registry
 	links          config.Links
+	datasources    config.DatasourcesConfig
 	sections       map[string][]Panel
 	entryHTTPWarn  bool
 	k8sMissingWarn bool
 	containerWarn  bool
 }
 
-// Build creates a deterministic dashboard from a validated site configuration.
-// The embedded base template supplies Grafana metadata and visual defaults;
-// rows, panels, variables and links are generated from the site graph.
+// Build creates a dashboard with no datasource defaults. Grafana will ask the
+// user to select the business/SkyWalking data sources at import time.
 func Build(site *config.Site, registry *metrics.Registry, links config.Links) (*Dashboard, error) {
+	return BuildWithDatasources(site, registry, links, config.DatasourcesConfig{})
+}
+
+// BuildWithDatasources creates a deterministic dashboard from a validated site
+// configuration. The embedded base template supplies Grafana metadata and
+// visual defaults; rows, panels, variables and links are generated from the
+// site graph. Datasource UIDs are optional defaults and never template
+// constants.
+func BuildWithDatasources(site *config.Site, registry *metrics.Registry, links config.Links, datasources config.DatasourcesConfig) (*Dashboard, error) {
 	if site == nil {
 		return nil, fmt.Errorf("站点配置为空")
 	}
@@ -50,7 +65,21 @@ func Build(site *config.Site, registry *metrics.Registry, links config.Links) (*
 	d.ID = nil
 	d.UID = DashboardUID(site.Metadata.ID)
 	d.Title = site.Metadata.Name + " · 站点全链路观测"
+	if len(site.Spec.Domains) > 0 && site.Spec.Domains[0].URL != "" {
+		d.Title = site.Metadata.Name + "（" + site.Spec.Domains[0].URL + "）· 站点全链路观测"
+	}
 	description := strings.TrimSpace(site.Metadata.Description)
+	if len(site.Spec.Domains) > 0 {
+		var domains []string
+		for _, domain := range site.Spec.Domains {
+			if domain.URL != "" {
+				domains = append(domains, domain.URL)
+			}
+		}
+		if len(domains) > 0 {
+			description = "域名: " + strings.Join(domains, ", ") + "\n\n" + description
+		}
+	}
 	if description != "" {
 		description += "\n\n"
 	}
@@ -63,22 +92,25 @@ func Build(site *config.Site, registry *metrics.Registry, links config.Links) (*
 		registry.TemplateVersionTag(),
 		"sitegen-dashboard-template:" + baseDigest,
 	}
-	d.Links = buildDashboardLinks(links)
+	d.Links = buildDashboardLinks(site, links)
 
 	b := &builder{
-		site:     site,
-		registry: registry,
-		links:    links,
-		sections: map[string][]Panel{},
+		site:        site,
+		registry:    registry,
+		links:       links,
+		datasources: datasources,
+		sections:    map[string][]Panel{},
 	}
 	b.addDomainPanels()
 	if err := b.addApplicationPanels(); err != nil {
 		return nil, fmt.Errorf("站点 %s: %w", site.Metadata.ID, err)
 	}
+	if err := b.addSkywalkingPanels(); err != nil {
+		return nil, fmt.Errorf("站点 %s: %w", site.Metadata.ID, err)
+	}
 	b.addComponentPanels()
-	b.addServicePanels()
 
-	variables, err := buildVariables(site, registry)
+	variables, err := buildVariables(site, registry, datasources)
 	if err != nil {
 		return nil, err
 	}
@@ -96,6 +128,10 @@ func Build(site *config.Site, registry *metrics.Registry, links config.Links) (*
 
 func validatePanelQueries(panels []Panel) error {
 	for _, panel := range panels {
+		if panel.Type == "nodeGraph" {
+			// The SkyWalking native datasource query is not PromQL.
+			continue
+		}
 		for _, target := range panel.Targets {
 			if err := metrics.ValidateQuery(target.Expr); err != nil {
 				return fmt.Errorf("面板 %q 的 PromQL 无效: %w\n原始表达式:\n%s", panel.Title, err, target.Expr)
@@ -138,9 +174,13 @@ func (b *builder) addDomainPanels() {
 	}
 	for _, domain := range b.site.Spec.Domains {
 		selector := metrics.DomainSelector(domain)
+		domainLabel := domain.URL
+		if domainLabel == "" {
+			domainLabel = domain.ID
+		}
 		for _, panel := range profile.Panels {
 			query := metrics.RenderQuery(panel.Query, selector)
-			b.addTemplatePanel(panel, domain.ID+" / "+panel.Name, query, nil)
+			b.addTemplatePanel(panel, domainLabel+" / "+panel.Name, query, nil, panelDatasourceRole(profile, panel))
 		}
 	}
 }
@@ -170,14 +210,14 @@ func (b *builder) addApplicationPanels() error {
 					if err != nil {
 						return fmt.Errorf("生成面板 %q（入口应用 %s）: %w", panel.Name, appIDs(entry), err)
 					}
-					b.addTemplatePanel(panel, panel.Name, query, nil)
+					b.addTemplatePanel(panel, panel.Name, query, nil, panelDatasourceRole(profile, panel))
 					continue
 				}
 				query, err := metrics.RenderApplicationQuery(panel.Query, apps, true, metrics.ProfileSelectorVar(profile.ID))
 				if err != nil {
 					return fmt.Errorf("生成面板 %q（应用 %s）: %w", panel.Name, appIDs(apps), err)
 				}
-				b.addTemplatePanel(panel, panel.Name, query, nil)
+				b.addTemplatePanel(panel, panel.Name, query, nil, panelDatasourceRole(profile, panel))
 			case metrics.ScopeNamespace:
 				k8sApps, missing := splitKubernetesApps(apps)
 				if len(missing) > 0 {
@@ -191,7 +231,7 @@ func (b *builder) addApplicationPanels() error {
 				if err != nil {
 					return fmt.Errorf("生成面板 %q（应用 %s）: %w", panel.Name, appIDs(k8sApps), err)
 				}
-				b.addTemplatePanel(panel, panel.Name, query, nil)
+				b.addTemplatePanel(panel, panel.Name, query, nil, panelDatasourceRole(profile, panel))
 			}
 		}
 	}
@@ -203,7 +243,7 @@ func (b *builder) addApplicationPanels() error {
 				if err != nil {
 					return fmt.Errorf("生成面板 %q（应用 %s）: %w", panel.Name, appIDs(b.site.Spec.Applications), err)
 				}
-				b.addTemplatePanel(panel, panel.Name, query, nil)
+				b.addTemplatePanel(panel, panel.Name, query, nil, panelDatasourceRole(auto, panel))
 			}
 		}
 	}
@@ -278,8 +318,6 @@ func (b *builder) addComponentPanels() {
 		return
 	}
 	var linkLines []string
-	var inventory []string
-	var unconfigured []string
 	for _, component := range b.site.Spec.Components {
 		profiles := b.activeComponentProfiles(component)
 		linkURL := componentDashboardURL(b.links, component)
@@ -292,44 +330,25 @@ func (b *builder) addComponentPanels() {
 			}}
 			linkLines = append(linkLines, fmt.Sprintf("- [%s](<%s>)", markdownText(component.Name), linkURL))
 		}
-		inventory = append(inventory, fmt.Sprintf("- `%s` %s（类型 `%s`，job `%s`）",
-			markdownCode(component.ID), markdownText(component.Name), markdownCode(component.Type), markdownCode(component.Prometheus.Job)))
-		if len(profiles) == 0 && linkURL == "" {
-			unconfigured = append(unconfigured, fmt.Sprintf("- `%s`（%s）：未启用指标模板，也未配置专业 Dashboard 链接",
-				markdownCode(component.ID), markdownCode(component.Type)))
-		}
 		for _, profile := range profiles {
 			selector := metrics.ComponentSelector(component)
 			for _, panel := range profile.Panels {
 				title := component.Name + " / " + panel.Name
 				query := metrics.RenderQuery(panel.Query, selector)
-				b.addTemplatePanel(panel, title, query, panelLinks)
+				b.addTemplatePanel(panel, title, query, panelLinks, panelDatasourceRole(profile, panel))
 			}
 		}
 	}
-	var content []string
-	content = append(content, "### 站点依赖组件", "")
-	if len(inventory) > 0 {
-		content = append(content, inventory...)
-	} else {
-		content = append(content, "站点未配置依赖组件。")
+	// Only a compact navigation panel is rendered. Monitoring values stay in
+	// the overview; detailed component analysis belongs to the professional
+	// dashboards, not to duplicated Sitegen panels.
+	if len(linkLines) == 0 {
+		return
 	}
-	if len(linkLines) > 0 {
-		content = append(content, "", "### 专业 Dashboard 下钻", "")
-		content = append(content, linkLines...)
-	}
-	if len(unconfigured) > 0 {
-		content = append(content, "", "### 未接入指标的组件", "")
-		content = append(content, unconfigured...)
-	}
-	content = append(content, "", "组件状态面板只在站点健康总览中生成一次，依赖组件的性能指标请进入专业 Dashboard 查看。")
+	content := "### 依赖组件专业 Dashboard\n\n" + strings.Join(linkLines, "\n") +
+		"\n\n组件运行状态见站点健康总览；QPS、连接池、慢查询、内存等详细指标请进入对应专业 Dashboard。"
 	b.sections[metrics.SectionComponent] = append(b.sections[metrics.SectionComponent],
-		textPanel("依赖组件与下钻", strings.Join(content, "\n")))
-}
-
-func (b *builder) addServicePanels() {
-	panels := buildServicePanels(b.site, b.links)
-	b.sections[metrics.SectionService] = append(b.sections[metrics.SectionService], panels...)
+		textPanel("依赖组件与下钻", content))
 }
 
 func (b *builder) activeComponentProfiles(component config.Component) []*metrics.Profile {
@@ -351,12 +370,70 @@ func (b *builder) activeComponentProfiles(component config.Component) []*metrics
 	return out
 }
 
-func (b *builder) addTemplatePanel(template metrics.Panel, title, query string, links []PanelLink) {
+func (b *builder) addTemplatePanel(template metrics.Panel, title, query string, links []PanelLink, datasourceRole string) {
+	role := datasourceRole
+	if role == "" {
+		role = template.Datasource
+	}
+	datasource := b.datasourceForRole(role)
+	dataLinks := b.dataLinks(template.LinkTargets)
 	for _, section := range template.Sections {
-		panel := renderPanel(template, title, query)
+		panel := renderPanel(template, title, query, datasource, dataLinks, b.site.Metadata.ID)
 		panel.Links = links
 		b.sections[section] = append(b.sections[section], panel)
 	}
+}
+
+func panelDatasourceRole(profile *metrics.Profile, panel metrics.Panel) string {
+	if panel.Datasource != "" {
+		return panel.Datasource
+	}
+	if profile != nil {
+		return profile.Datasource
+	}
+	return ""
+}
+
+func (b *builder) datasourceForRole(role string) *Datasource {
+	switch role {
+	case "skywalking_prometheus":
+		return &Datasource{Type: "prometheus", UID: skywalkingPrometheusUID}
+	case "skywalking_datasource":
+		return &Datasource{Type: "apache-skywalking-datasource", UID: skywalkingDatasourceUID}
+	default:
+		return &Datasource{Type: "prometheus", UID: datasourceUID}
+	}
+}
+
+// addSkywalkingPanels adds the SkyWalking APM, topology, instance and endpoint
+// panels once per dashboard. The visible $service variable selects the app.
+func (b *builder) addSkywalkingPanels() error {
+	if !siteHasSkywalking(b.site) {
+		return nil
+	}
+	for _, id := range b.registry.Order {
+		profile := b.registry.Profiles[id]
+		if !profile.Auto || profile.Scope != metrics.ScopeSkywalking {
+			continue
+		}
+		for _, panel := range profile.Panels {
+			query := metrics.RenderQuery(panel.Query, "")
+			b.addTemplatePanel(panel, panel.Name, query, nil, panelDatasourceRole(profile, panel))
+		}
+	}
+	return nil
+}
+
+func siteHasSkywalking(site *config.Site) bool {
+	if site == nil {
+		return false
+	}
+	for _, app := range site.Spec.Applications {
+		if app.SkywalkingEnabled() {
+			return true
+		}
+	}
+	return false
 }
 
 func (b *builder) layout() []Panel {
@@ -428,7 +505,7 @@ func panelSize(section, panelType string) (int, int) {
 			return 6, 5
 		}
 		return 8, 6
-	case metrics.SectionHTTP:
+	case metrics.SectionHTTP, metrics.SectionAPM, metrics.SectionInstances:
 		if panelType == "table" {
 			return 12, 9
 		}
@@ -436,6 +513,9 @@ func panelSize(section, panelType string) (int, int) {
 	case metrics.SectionRuntime:
 		return 12, 8
 	case metrics.SectionService:
+		if panelType == "nodeGraph" {
+			return 24, 12
+		}
 		return 12, 6
 	case metrics.SectionComponent:
 		return 12, 6

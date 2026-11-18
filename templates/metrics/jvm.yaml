@@ -9,33 +9,135 @@ profiles:
       groupBy: [application, namespace, job]
       labels: [pod, area, id]
     panels:
-      - id: jvm-heap-by-pod
-        name: JVM Heap（按 Pod）
-        description: 仅使用已确认的 jvm_memory_used_bytes；按当前应用和 $jvm_pod 筛选，展示每个 Pod 的 heap 使用量。其他 JVM 指标需在真实 Prometheus 中确认后再加入模板。
+      # JVM is an application-runtime view. Pod selection is intentionally
+      # absent: Kubernetes Pod drill-down belongs to the Kubernetes section.
+      - id: jvm-heap
+        name: JVM Heap 使用量
+        description: 当前应用所有 Pod 的 Heap 使用量总和，按 application + namespace 聚合。
         query: |
-          sum by (pod) (
-            jvm_memory_used_bytes{%SELECTOR%, area="heap", pod=~"${jvm_pod:regex}"}
-          )
+          sum(jvm_memory_used_bytes{%SELECTOR%, area="heap"})
         unit: bytes
         panel: timeseries
-        legendFormat: "{{pod}}"
+        legendFormat: Heap
         sections: [runtime]
+        requiredMetrics: [jvm_memory_used_bytes]
+        requiredLabels: [application, namespace, job, area]
+
+      - id: jvm-heap-usage
+        name: JVM Heap 使用率
+        description: Heap 已使用量 / Heap 最大值；多 Pod 时分别求和后再计算比例。
+        query: |
+          sum(jvm_memory_used_bytes{%SELECTOR%, area="heap"})
+          /
+          clamp_min(sum(jvm_memory_max_bytes{%SELECTOR%, area="heap"}), 1)
+        unit: percentunit
+        panel: timeseries
+        legendFormat: Heap 使用率
+        sections: [runtime]
+        thresholds:
+          - color: green
+          - color: yellow
+            value: 0.8
+          - color: red
+            value: 0.9
         requiredMetrics:
           - jvm_memory_used_bytes
-        requiredLabels: [application, namespace, job, area, pod]
+          - jvm_memory_max_bytes
+        requiredLabels: [application, namespace, job, area]
+
+      - id: jvm-nonheap
+        name: JVM Non-Heap 使用量
+        description: 当前应用 Non-Heap 使用量总和。
+        query: |
+          sum(jvm_memory_used_bytes{%SELECTOR%, area="nonheap"})
+        unit: bytes
+        panel: timeseries
+        legendFormat: Non-Heap
+        sections: [runtime]
+        requiredMetrics: [jvm_memory_used_bytes]
+        requiredLabels: [application, namespace, job, area]
 
       - id: jvm-heap-by-pool
         name: JVM Heap（按内存池）
-        description: jvm_memory_used_bytes 按 pod 和内存池 id 展示 heap 分布；与 Pod 总览使用相同的应用和 Pod 归属。
+        description: 当前应用 Heap 按内存池 id 的分布；不引入 Pod 维度。
         query: |
-          sum by (pod, id) (
-            jvm_memory_used_bytes{%SELECTOR%, area="heap", pod=~"${jvm_pod:regex}"}
+          sum by (id) (
+            jvm_memory_used_bytes{%SELECTOR%, area="heap"}
           )
         unit: bytes
         panel: timeseries
-        legendFormat: "{{pod}} / {{id}}"
+        legendFormat: "{{id}}"
         sections: [runtime]
-        requiredMetrics:
-          - jvm_memory_used_bytes
-        requiredLabels: [application, namespace, job, area, pod]
+        requiredMetrics: [jvm_memory_used_bytes]
+        requiredLabels: [application, namespace, job, area]
         optionalLabels: [id]
+
+      - id: jvm-gc-rate
+        name: JVM GC 次数
+        description: 每秒 GC 暂停次数，按应用聚合。
+        query: |
+          sum(rate(jvm_gc_pause_seconds_count{%SELECTOR%}[5m]))
+        unit: ops
+        panel: timeseries
+        legendFormat: GC 次数/秒
+        sections: [runtime]
+        requiredMetrics: [jvm_gc_pause_seconds_count]
+        requiredLabels: [application, namespace, job]
+
+      - id: jvm-gc-pause
+        name: JVM GC 暂停时间
+        description: 每秒 GC 暂停总时间（秒）。
+        query: |
+          sum(rate(jvm_gc_pause_seconds_sum{%SELECTOR%}[5m]))
+        unit: s
+        panel: timeseries
+        legendFormat: GC 暂停秒/秒
+        sections: [runtime]
+        requiredMetrics: [jvm_gc_pause_seconds_sum]
+        requiredLabels: [application, namespace, job]
+
+      - id: jvm-threads
+        name: JVM 活跃线程数
+        description: 当前应用 JVM 活跃线程总数。
+        query: |
+          sum(jvm_threads_live_threads{%SELECTOR%})
+        unit: short
+        panel: timeseries
+        legendFormat: 线程数
+        sections: [runtime]
+        requiredMetrics: [jvm_threads_live_threads]
+        requiredLabels: [application, namespace, job]
+
+      - id: jvm-process-cpu
+        name: JVM 进程 CPU
+        description: 当前应用 JVM 进程 CPU 使用率。
+        query: |
+          sum(process_cpu_usage{%SELECTOR%})
+        unit: percentunit
+        panel: timeseries
+        legendFormat: Process CPU
+        sections: [runtime]
+        thresholds:
+          - color: green
+          - color: yellow
+            value: 0.7
+          - color: red
+            value: 0.9
+        requiredMetrics: [process_cpu_usage]
+        requiredLabels: [application, namespace, job]
+
+      - id: jvm-uptime
+        name: JVM 进程运行时长
+        description: 进程运行时长；为 0 或缺失时表示当前应用可能没有可用 JVM 进程数据。
+        query: |
+          max(process_uptime_seconds{%SELECTOR%})
+        unit: s
+        panel: stat
+        sections: [runtime]
+        instant: true
+        thresholds:
+          - color: red
+          - color: green
+            value: 1
+        requiredMetrics: [process_uptime_seconds]
+        requiredLabels: [application, namespace, job]

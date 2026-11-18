@@ -15,11 +15,85 @@
       }
     ]
   },
-  "description": "根据目标 Prometheus 的真实数据验证过的站点配置\n\n由 sitegen 根据站点 YAML 生成，请勿手工修改。",
+  "description": "域名: https://admin-dev.rtdgo.tech\n\n根据目标 Prometheus 的真实数据验证过的站点配置\n\n由 sitegen 根据站点 YAML 生成，请勿手工修改。",
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
   "id": null,
+  "links": [
+    {
+      "asDropdown": false,
+      "icon": "external link",
+      "includeVars": false,
+      "keepTime": false,
+      "tags": [],
+      "targetBlank": true,
+      "title": "Grafana",
+      "tooltip": "Grafana",
+      "type": "link",
+      "url": "https://grafana-dev.rtdgo.tech"
+    },
+    {
+      "asDropdown": false,
+      "icon": "external link",
+      "includeVars": false,
+      "keepTime": true,
+      "tags": [],
+      "targetBlank": true,
+      "title": "SkyWalking 服务详情",
+      "tooltip": "SkyWalking 服务详情",
+      "type": "link",
+      "url": "d/ffhv7bsxmi48wd/skywalking-service?var-DS_Prometheus=${skywalking_prometheus}&var-DS_Skywalking=${skywalking_datasource}&var-layer=${layer}&var-service=${service:queryparam}"
+    },
+    {
+      "asDropdown": false,
+      "icon": "external link",
+      "includeVars": false,
+      "keepTime": true,
+      "tags": [],
+      "targetBlank": true,
+      "title": "Kubernetes 集群",
+      "tooltip": "Kubernetes 集群",
+      "type": "link",
+      "url": "d/StarsL_cn_K8S/k8s-dashboard?var-NameSpace=dev"
+    },
+    {
+      "asDropdown": false,
+      "icon": "external link",
+      "includeVars": false,
+      "keepTime": true,
+      "tags": [],
+      "targetBlank": true,
+      "title": "Blackbox Prober",
+      "tooltip": "Blackbox Prober",
+      "type": "link",
+      "url": "d/NEzutrbMk/blackbox-exporter-http-prober?var-job=blackbox-sites-dev&var-instance=https%3A%2F%2Fadmin-dev.rtdgo.tech"
+    },
+    {
+      "asDropdown": false,
+      "icon": "external link",
+      "includeVars": false,
+      "keepTime": true,
+      "tags": [],
+      "targetBlank": true,
+      "title": "MySQL Dev",
+      "tooltip": "MySQL Dev",
+      "type": "link",
+      "url": "d/0D6dTg3Zk/mysqld-exporter-dashboard?var-host=10.10.100.10%3A3306&var-node_host=10.10.100.10"
+    },
+    {
+      "asDropdown": false,
+      "icon": "external link",
+      "includeVars": false,
+      "keepTime": true,
+      "tags": [],
+      "targetBlank": true,
+      "title": "Redis Dev",
+      "tooltip": "Redis Dev",
+      "type": "link",
+      "url": "d/redis-exporter-overview/redis?var-instance=redis%3A%2F%2F10.10.100.10%3A16379"
+    }
+  ],
   "panels": [
     {
       "collapsed": false,
@@ -98,7 +172,7 @@
           "refId": "A"
         }
       ],
-      "title": "admin / 站点可用性",
+      "title": "https://admin-dev.rtdgo.tech / 站点可用性",
       "type": "stat"
     },
     {
@@ -152,7 +226,7 @@
           "refId": "A"
         }
       ],
-      "title": "admin / 外部探测耗时",
+      "title": "https://admin-dev.rtdgo.tech / 外部探测耗时",
       "type": "stat"
     },
     {
@@ -507,6 +581,13 @@
         "y": 6
       },
       "id": 9,
+      "links": [
+        {
+          "title": "打开 MySQL Dev 专业 Dashboard",
+          "url": "https://grafana-dev.rtdgo.tech/d/0D6dTg3Zk?var-host=10.10.100.10%3A3306&var-node_host=10.10.100.10",
+          "targetBlank": true
+        }
+      ],
       "options": {
         "colorMode": "value",
         "graphMode": "area",
@@ -574,6 +655,13 @@
         "y": 11
       },
       "id": 10,
+      "links": [
+        {
+          "title": "打开 Redis Dev 专业 Dashboard",
+          "url": "https://grafana-dev.rtdgo.tech/d/redis-exporter-overview?var-instance=redis%3A%2F%2F10.10.100.10%3A16379",
+          "targetBlank": true
+        }
+      ],
       "options": {
         "colorMode": "value",
         "graphMode": "area",
@@ -1589,9 +1677,9 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "${skywalking_prometheus}"
           },
-          "description": "仅使用已确认的 jvm_memory_used_bytes；按当前应用和 $jvm_pod 筛选，展示每个 Pod 的 heap 使用量。其他 JVM 指标需在真实 Prometheus 中确认后再加入模板。",
+          "description": "SkyWalking 服务 Apdex。值域 0-1，越高越好。",
           "fieldConfig": {
             "defaults": {
               "color": {
@@ -1625,10 +1713,27 @@
                   "mode": "none"
                 },
                 "thresholdsStyle": {
-                  "mode": "off"
+                  "mode": "line+area"
                 }
               },
-              "unit": "bytes"
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "red",
+                    "value": null
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 0.5
+                  },
+                  {
+                    "color": "green",
+                    "value": 0.9
+                  }
+                ]
+              },
+              "unit": "none"
             },
             "overrides": []
           },
@@ -1655,16 +1760,995 @@
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "${datasource}"
+                "uid": "${skywalking_prometheus}"
               },
               "editorMode": "code",
-              "expr": "sum by (pod) (\n  (\n    (\n        (\n          (\n              label_replace(\n                jvm_memory_used_bytes{application=\"rtd-admin\",area=\"heap\",job=\"rtd-admin\",namespace=\"dev\",pod=~\"${jvm_pod:regex}\"},\n                \"sitegen_app\",\n                \"rtd-admin-dev\",\n                \"\",\n                \"\"\n              )\n            or\n              label_replace(\n                jvm_memory_used_bytes{application=\"user-center-application\",area=\"heap\",job=\"user-center-application\",namespace=\"dev\",pod=~\"${jvm_pod:regex}\"},\n                \"sitegen_app\",\n                \"user-center-application-dev\",\n                \"\",\n                \"\"\n              )\n          )\n        )\n      * on (sitegen_app) group_left ()\n        label_replace(vector(1), \"sitegen_app\", \"${jvm_app_selector}\", \"\", \"\")\n    )\n  )\n)",
-              "legendFormat": "{{pod}}",
+              "expr": "avg(service_apdex{layer=\"$layer\", service=\"$service\"}) / 10000\n",
+              "legendFormat": "Apdex",
               "range": true,
               "refId": "A"
             }
           ],
-          "title": "JVM Heap（按 Pod）",
+          "title": "服务 Apdex",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${skywalking_prometheus}"
+          },
+          "description": "SkyWalking 服务 SLA。service_sla 除以 100 后为 0-100 的百分比。",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "insertNulls": false,
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "line+area"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "red",
+                    "value": null
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 95
+                  },
+                  {
+                    "color": "green",
+                    "value": 99.5
+                  }
+                ]
+              },
+              "unit": "percent"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 1
+          },
+          "id": 26,
+          "options": {
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${skywalking_prometheus}"
+              },
+              "editorMode": "code",
+              "expr": "avg(service_sla{layer=\"$layer\", service=\"$service\"}) / 100\n",
+              "legendFormat": "SLA",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "服务成功率",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${skywalking_prometheus}"
+          },
+          "description": "SkyWalking 服务每分钟调用量（CPM）。",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "insertNulls": false,
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "unit": "calls / min"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 9
+          },
+          "id": 27,
+          "options": {
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${skywalking_prometheus}"
+              },
+              "editorMode": "code",
+              "expr": "avg(service_cpm{layer=\"$layer\", service=\"$service\"})\n",
+              "legendFormat": "CPM",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "服务请求量",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${skywalking_prometheus}"
+          },
+          "description": "SkyWalking 服务平均响应时间，单位毫秒。",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "insertNulls": false,
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "line+area"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 200
+                  },
+                  {
+                    "color": "red",
+                    "value": 500
+                  }
+                ]
+              },
+              "unit": "ms"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 9
+          },
+          "id": 28,
+          "options": {
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${skywalking_prometheus}"
+              },
+              "editorMode": "code",
+              "expr": "service_resp_time{layer=\"$layer\", service=\"$service\"}\n",
+              "legendFormat": "{{service}}",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "服务平均响应时间",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${skywalking_prometheus}"
+          },
+          "description": "P50 / P75 / P90 / P95 / P99，单位毫秒。",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "insertNulls": false,
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "unit": "ms"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 17
+          },
+          "id": 29,
+          "options": {
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${skywalking_prometheus}"
+              },
+              "editorMode": "code",
+              "expr": "service_percentile{labels=\"0,1,2,3,4\",layer=\"$layer\",relabels=\"P50,P75,P90,P95,P99\",service=\"$service\"}\n",
+              "legendFormat": "{{p}}",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "服务响应时间分位数",
+          "type": "timeseries"
+        }
+      ],
+      "title": "应用 APM 分析",
+      "type": "row"
+    },
+    {
+      "collapsed": true,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 18
+      },
+      "id": 30,
+      "panels": [
+        {
+          "datasource": {
+            "type": "apache-skywalking-datasource",
+            "uid": "${skywalking_datasource}"
+          },
+          "description": "使用 SkyWalking 原生数据源查询服务节点和调用边。没有调用数据时 Grafana 会显示空图，不影响其他 Prometheus 面板。",
+          "gridPos": {
+            "h": 12,
+            "w": 24,
+            "x": 0,
+            "y": 1
+          },
+          "id": 31,
+          "options": {
+            "edges": {},
+            "layoutAlgorithm": "layered",
+            "nodes": {},
+            "zoomMode": "cooperative"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "apache-skywalking-datasource",
+                "uid": "${skywalking_datasource}"
+              },
+              "range": false,
+              "refId": "A",
+              "key": "sitegen-topology-admin-dev",
+              "service": "$service",
+              "layer": "GENERAL",
+              "nodeMetrics": "{\"name\": \"service_cpm\", \"label\": \"Load\", \"unit\": \"cpm\"}, { \"name\": \"service_sla\", \"calculation\": \"percentage\", \"label\": \"Success Rate\", \"unit\": \"%\" }",
+              "edgeMetrics": "{\"name\": \"service_relation_server_resp_time\", \"label\": \"Client Latency\", \"unit\": \"ms\", \"type\": \"SERVER\"}, { \"name\": \"service_relation_client_cpm\", \"label\": \"Client Load\", \"unit\": \"cpm\", \"type\": \"CLIENT\" }"
+            }
+          ],
+          "title": "SkyWalking 服务拓扑",
+          "type": "nodeGraph"
+        }
+      ],
+      "title": "服务调用拓扑",
+      "type": "row"
+    },
+    {
+      "collapsed": true,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 19
+      },
+      "id": 32,
+      "panels": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${skywalking_prometheus}"
+          },
+          "description": "当前服务实例请求量，按 CPM 降序，Top 10。",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 100
+                  },
+                  {
+                    "color": "orange",
+                    "value": 500
+                  },
+                  {
+                    "color": "red",
+                    "value": 1000
+                  }
+                ]
+              },
+              "unit": "calls / min",
+              "links": [
+                {
+                  "title": "实例详情",
+                  "url": "d/efigjuk3p9a0wc/skywalking-instance?var-service=${service:queryparam}&var-service_instance=${__field.labels.service_instance}"
+                }
+              ]
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 1
+          },
+          "id": 33,
+          "options": {
+            "displayMode": "gradient",
+            "orientation": "horizontal",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "showUnfilled": true
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${skywalking_prometheus}"
+              },
+              "editorMode": "code",
+              "expr": "service_instance_cpm{layer=\"$layer\",order=\"DES\",parent_service=\"$service\",top_n=\"10\"}\n",
+              "legendFormat": "{{service_instance}}",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "实例请求量 Top 10",
+          "type": "bargauge"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${skywalking_prometheus}"
+          },
+          "description": "当前服务实例平均响应时间，单位毫秒。",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 200
+                  },
+                  {
+                    "color": "red",
+                    "value": 500
+                  }
+                ]
+              },
+              "unit": "ms",
+              "links": [
+                {
+                  "title": "实例详情",
+                  "url": "d/efigjuk3p9a0wc/skywalking-instance?var-service=${service:queryparam}&var-service_instance=${__field.labels.service_instance}"
+                }
+              ]
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 1
+          },
+          "id": 34,
+          "options": {
+            "displayMode": "gradient",
+            "orientation": "horizontal",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "showUnfilled": true
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${skywalking_prometheus}"
+              },
+              "editorMode": "code",
+              "expr": "service_instance_resp_time{layer=\"$layer\",order=\"DES\",parent_service=\"$service\",top_n=\"10\"}\n",
+              "legendFormat": "{{service_instance}}",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "实例响应时间 Top 10",
+          "type": "bargauge"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${skywalking_prometheus}"
+          },
+          "description": "当前服务实例成功率，按升序展示最低的实例，便于优先定位异常实例。",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "red",
+                    "value": null
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 95
+                  },
+                  {
+                    "color": "green",
+                    "value": 99.5
+                  }
+                ]
+              },
+              "unit": "percent",
+              "links": [
+                {
+                  "title": "实例详情",
+                  "url": "d/efigjuk3p9a0wc/skywalking-instance?var-service=${service:queryparam}&var-service_instance=${__field.labels.service_instance}"
+                }
+              ]
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 9
+          },
+          "id": 35,
+          "options": {
+            "displayMode": "gradient",
+            "orientation": "horizontal",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "showUnfilled": true
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${skywalking_prometheus}"
+              },
+              "editorMode": "code",
+              "expr": "service_instance_sla{layer=\"$layer\",order=\"ASC\",parent_service=\"$service\",top_n=\"10\"} / 100\n",
+              "legendFormat": "{{service_instance}}",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "实例成功率 Top 10",
+          "type": "bargauge"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${skywalking_prometheus}"
+          },
+          "description": "当前服务 Endpoint 请求量，按 CPM 降序，Top 10。",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 100
+                  },
+                  {
+                    "color": "orange",
+                    "value": 500
+                  },
+                  {
+                    "color": "red",
+                    "value": 1000
+                  }
+                ]
+              },
+              "unit": "calls / min",
+              "links": [
+                {
+                  "title": "Endpoint 详情",
+                  "url": "d/bfigjdt9vx98ga/skywalking-endpoint?var-endpoint=${__field.labels.endpoint}&var-service=${service:queryparam}&${__url_time_range}"
+                },
+                {
+                  "title": "Trace 查询",
+                  "url": "d/ad2xd6l/eksen-skywalking-trace?var-endpoint=${__field.labels.endpoint}&var-service=${service:queryparam}&${__url_time_range}",
+                  "targetBlank": true
+                }
+              ]
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 9
+          },
+          "id": 36,
+          "options": {
+            "displayMode": "gradient",
+            "orientation": "horizontal",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "showUnfilled": true
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${skywalking_prometheus}"
+              },
+              "editorMode": "code",
+              "expr": "endpoint_cpm{layer=\"$layer\",order=\"DES\",parent_service=\"$service\",top_n=\"10\"}\n",
+              "legendFormat": "{{endpoint}}",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "Endpoint 请求量 Top 10",
+          "type": "bargauge"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${skywalking_prometheus}"
+          },
+          "description": "当前服务 Endpoint 平均响应时间，单位毫秒。",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 200
+                  },
+                  {
+                    "color": "red",
+                    "value": 500
+                  }
+                ]
+              },
+              "unit": "ms",
+              "links": [
+                {
+                  "title": "Endpoint 详情",
+                  "url": "d/bfigjdt9vx98ga/skywalking-endpoint?var-endpoint=${__field.labels.endpoint}&var-service=${service:queryparam}&${__url_time_range}"
+                },
+                {
+                  "title": "Trace 查询",
+                  "url": "d/ad2xd6l/eksen-skywalking-trace?var-endpoint=${__field.labels.endpoint}&var-service=${service:queryparam}&${__url_time_range}",
+                  "targetBlank": true
+                }
+              ]
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 17
+          },
+          "id": 37,
+          "options": {
+            "displayMode": "gradient",
+            "orientation": "horizontal",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "showUnfilled": true
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${skywalking_prometheus}"
+              },
+              "editorMode": "code",
+              "expr": "endpoint_resp_time{layer=\"$layer\",order=\"DES\",parent_service=\"$service\",top_n=\"10\"}\n",
+              "legendFormat": "{{endpoint}}",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "Endpoint 响应时间 Top 10",
+          "type": "bargauge"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${skywalking_prometheus}"
+          },
+          "description": "当前服务 Endpoint 成功率，按升序展示最低的 Endpoint。",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "red",
+                    "value": null
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 95
+                  },
+                  {
+                    "color": "green",
+                    "value": 99.5
+                  }
+                ]
+              },
+              "unit": "percent",
+              "links": [
+                {
+                  "title": "Endpoint 详情",
+                  "url": "d/bfigjdt9vx98ga/skywalking-endpoint?var-endpoint=${__field.labels.endpoint}&var-service=${service:queryparam}&${__url_time_range}"
+                },
+                {
+                  "title": "Trace 查询",
+                  "url": "d/ad2xd6l/eksen-skywalking-trace?var-endpoint=${__field.labels.endpoint}&var-service=${service:queryparam}&${__url_time_range}",
+                  "targetBlank": true
+                }
+              ]
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 17
+          },
+          "id": 38,
+          "options": {
+            "displayMode": "gradient",
+            "orientation": "horizontal",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "showUnfilled": true
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${skywalking_prometheus}"
+              },
+              "editorMode": "code",
+              "expr": "endpoint_sla{layer=\"$layer\",order=\"ASC\",parent_service=\"$service\",top_n=\"10\"} / 100\n",
+              "legendFormat": "{{endpoint}}",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "Endpoint 成功率 Top 10",
+          "type": "bargauge"
+        }
+      ],
+      "title": "应用实例与 Endpoint",
+      "type": "row"
+    },
+    {
+      "collapsed": true,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 20
+      },
+      "id": 39,
+      "panels": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "当前应用所有 Pod 的 Heap 使用量总和，按 application + namespace 聚合。",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "insertNulls": false,
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "unit": "bytes"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 1
+          },
+          "id": 40,
+          "options": {
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum(\n  (\n    (\n        (\n          (\n              label_replace(\n                jvm_memory_used_bytes{application=\"rtd-admin\",area=\"heap\",job=\"rtd-admin\",namespace=\"dev\"},\n                \"sitegen_app\",\n                \"rtd-admin-dev\",\n                \"\",\n                \"\"\n              )\n            or\n              label_replace(\n                jvm_memory_used_bytes{application=\"user-center-application\",area=\"heap\",job=\"user-center-application\",namespace=\"dev\"},\n                \"sitegen_app\",\n                \"user-center-application-dev\",\n                \"\",\n                \"\"\n              )\n          )\n        )\n      * on (sitegen_app) group_left ()\n        label_replace(vector(1), \"sitegen_app\", \"${jvm_app_selector}\", \"\", \"\")\n    )\n  )\n)",
+              "legendFormat": "Heap",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "JVM Heap 使用量",
           "type": "timeseries"
         },
         {
@@ -1672,7 +2756,186 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "jvm_memory_used_bytes 按 pod 和内存池 id 展示 heap 分布；与 Pod 总览使用相同的应用和 Pod 归属。",
+          "description": "Heap 已使用量 / Heap 最大值；多 Pod 时分别求和后再计算比例。",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "insertNulls": false,
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "line+area"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 0.8
+                  },
+                  {
+                    "color": "red",
+                    "value": 0.9
+                  }
+                ]
+              },
+              "unit": "percentunit"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 1
+          },
+          "id": 41,
+          "options": {
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "  sum(\n    (\n      (\n          (\n            (\n                label_replace(\n                  jvm_memory_used_bytes{application=\"rtd-admin\",area=\"heap\",job=\"rtd-admin\",namespace=\"dev\"},\n                  \"sitegen_app\",\n                  \"rtd-admin-dev\",\n                  \"\",\n                  \"\"\n                )\n              or\n                label_replace(\n                  jvm_memory_used_bytes{application=\"user-center-application\",area=\"heap\",job=\"user-center-application\",namespace=\"dev\"},\n                  \"sitegen_app\",\n                  \"user-center-application-dev\",\n                  \"\",\n                  \"\"\n                )\n            )\n          )\n        * on (sitegen_app) group_left ()\n          label_replace(vector(1), \"sitegen_app\", \"${jvm_app_selector}\", \"\", \"\")\n      )\n    )\n  )\n/\n  clamp_min(\n    sum(\n      (\n        (\n            (\n              (\n                  label_replace(\n                    jvm_memory_max_bytes{application=\"rtd-admin\",area=\"heap\",job=\"rtd-admin\",namespace=\"dev\"},\n                    \"sitegen_app\",\n                    \"rtd-admin-dev\",\n                    \"\",\n                    \"\"\n                  )\n                or\n                  label_replace(\n                    jvm_memory_max_bytes{application=\"user-center-application\",area=\"heap\",job=\"user-center-application\",namespace=\"dev\"},\n                    \"sitegen_app\",\n                    \"user-center-application-dev\",\n                    \"\",\n                    \"\"\n                  )\n              )\n            )\n          * on (sitegen_app) group_left ()\n            label_replace(vector(1), \"sitegen_app\", \"${jvm_app_selector}\", \"\", \"\")\n        )\n      )\n    ),\n    1\n  )",
+              "legendFormat": "Heap 使用率",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "JVM Heap 使用率",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "当前应用 Non-Heap 使用量总和。",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "insertNulls": false,
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "unit": "bytes"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 9
+          },
+          "id": 42,
+          "options": {
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum(\n  (\n    (\n        (\n          (\n              label_replace(\n                jvm_memory_used_bytes{application=\"rtd-admin\",area=\"nonheap\",job=\"rtd-admin\",namespace=\"dev\"},\n                \"sitegen_app\",\n                \"rtd-admin-dev\",\n                \"\",\n                \"\"\n              )\n            or\n              label_replace(\n                jvm_memory_used_bytes{application=\"user-center-application\",area=\"nonheap\",job=\"user-center-application\",namespace=\"dev\"},\n                \"sitegen_app\",\n                \"user-center-application-dev\",\n                \"\",\n                \"\"\n              )\n          )\n        )\n      * on (sitegen_app) group_left ()\n        label_replace(vector(1), \"sitegen_app\", \"${jvm_app_selector}\", \"\", \"\")\n    )\n  )\n)",
+              "legendFormat": "Non-Heap",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "JVM Non-Heap 使用量",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "当前应用 Heap 按内存池 id 的分布；不引入 Pod 维度。",
           "fieldConfig": {
             "defaults": {
               "color": {
@@ -1717,9 +2980,9 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 1
+            "y": 9
           },
-          "id": 26,
+          "id": 43,
           "options": {
             "legend": {
               "calcs": [],
@@ -1739,105 +3002,425 @@
                 "uid": "${datasource}"
               },
               "editorMode": "code",
-              "expr": "sum by (pod, id) (\n  (\n    (\n        (\n          (\n              label_replace(\n                jvm_memory_used_bytes{application=\"rtd-admin\",area=\"heap\",job=\"rtd-admin\",namespace=\"dev\",pod=~\"${jvm_pod:regex}\"},\n                \"sitegen_app\",\n                \"rtd-admin-dev\",\n                \"\",\n                \"\"\n              )\n            or\n              label_replace(\n                jvm_memory_used_bytes{application=\"user-center-application\",area=\"heap\",job=\"user-center-application\",namespace=\"dev\",pod=~\"${jvm_pod:regex}\"},\n                \"sitegen_app\",\n                \"user-center-application-dev\",\n                \"\",\n                \"\"\n              )\n          )\n        )\n      * on (sitegen_app) group_left ()\n        label_replace(vector(1), \"sitegen_app\", \"${jvm_app_selector}\", \"\", \"\")\n    )\n  )\n)",
-              "legendFormat": "{{pod}} / {{id}}",
+              "expr": "sum by (id) (\n  (\n    (\n        (\n          (\n              label_replace(\n                jvm_memory_used_bytes{application=\"rtd-admin\",area=\"heap\",job=\"rtd-admin\",namespace=\"dev\"},\n                \"sitegen_app\",\n                \"rtd-admin-dev\",\n                \"\",\n                \"\"\n              )\n            or\n              label_replace(\n                jvm_memory_used_bytes{application=\"user-center-application\",area=\"heap\",job=\"user-center-application\",namespace=\"dev\"},\n                \"sitegen_app\",\n                \"user-center-application-dev\",\n                \"\",\n                \"\"\n              )\n          )\n        )\n      * on (sitegen_app) group_left ()\n        label_replace(vector(1), \"sitegen_app\", \"${jvm_app_selector}\", \"\", \"\")\n    )\n  )\n)",
+              "legendFormat": "{{id}}",
               "range": true,
               "refId": "A"
             }
           ],
           "title": "JVM Heap（按内存池）",
           "type": "timeseries"
-        }
-      ],
-      "title": "应用与 JVM",
-      "type": "row"
-    },
-    {
-      "collapsed": true,
-      "gridPos": {
-        "h": 1,
-        "w": 24,
-        "x": 0,
-        "y": 18
-      },
-      "id": 27,
-      "panels": [
-        {
-          "gridPos": {
-            "h": 6,
-            "w": 12,
-            "x": 0,
-            "y": 1
-          },
-          "id": 28,
-          "options": {
-            "code": {
-              "language": "plaintext",
-              "showLineNumbers": false,
-              "showMiniMap": false
-            },
-            "content": "### SkyWalking 服务映射\n\n- `rtd-admin/dev` → SkyWalking Service `rtd-admin_dev`\n- `user-center-application/dev` → SkyWalking Service `user-center-application_dev`\n未配置 SkyWalking UI 地址。以下是 YAML 中声明的 Prometheus 应用与 SkyWalking Service 映射关系；配置 `spec.links.skywalking` 或应用的 `skywalking.ui` 后可从这里下钻。\n\n\n未配置 Service URL 模板（`skywalkingServiceURLTemplate` 或应用级 `skywalking.ui.serviceURLTemplate`）；不会把 SkyWalking 首页伪装成具体 Service 页面。\n\n未配置 Endpoint URL 模板（`skywalkingEndpointURLTemplate` 或应用级 `skywalking.ui.endpointURLTemplate`）；不会生成 Endpoint 专属链接，请从 SkyWalking Service 页面进入 Endpoint 排行。\n\nYAML 声明的 Endpoint 维度格式：`{method}:{uri}`",
-            "mode": "markdown"
-          },
-          "title": "SkyWalking 服务映射与下钻",
-          "type": "text"
         },
         {
-          "gridPos": {
-            "h": 6,
-            "w": 12,
-            "x": 12,
-            "y": 1
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
           },
-          "id": 29,
-          "options": {
-            "code": {
-              "language": "plaintext",
-              "showLineNumbers": false,
-              "showMiniMap": false
+          "description": "每秒 GC 暂停次数，按应用聚合。",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "insertNulls": false,
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "unit": "ops"
             },
-            "content": "### YAML 显式依赖（配置关系，非 SkyWalking 实测拓扑）\n\n- `rtd-admin/dev` → user-center-application/dev, MySQL Dev, Redis Dev\n- `user-center-application/dev` → MySQL Dev, Redis Dev\n\n本 Dashboard 不伪造调用拓扑；实际调用关系请以 SkyWalking 服务拓扑和 Trace 为准。",
-            "mode": "markdown"
+            "overrides": []
           },
-          "title": "YAML 配置依赖",
-          "type": "text"
-        }
-      ],
-      "title": "服务调用关系",
-      "type": "row"
-    },
-    {
-      "collapsed": true,
-      "gridPos": {
-        "h": 1,
-        "w": 24,
-        "x": 0,
-        "y": 19
-      },
-      "id": 30,
-      "panels": [
-        {
           "gridPos": {
-            "h": 6,
+            "h": 8,
             "w": 12,
             "x": 0,
-            "y": 1
+            "y": 17
           },
-          "id": 31,
+          "id": 44,
           "options": {
-            "code": {
-              "language": "plaintext",
-              "showLineNumbers": false,
-              "showMiniMap": false
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
             },
-            "content": "### 站点依赖组件\n\n- `mysql-dev` MySQL Dev（类型 `mysql`，job `scrapeConfig/monitoring/mysql-exporter-dev`）\n- `redis-dev` Redis Dev（类型 `redis`，job `scrapeConfig/monitoring/redis-exporter`）\n\n组件状态面板只在站点健康总览中生成一次，依赖组件的性能指标请进入专业 Dashboard 查看。",
-            "mode": "markdown"
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
           },
-          "title": "依赖组件与下钻",
-          "type": "text"
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum(\n  (\n    (\n        (\n          (\n              label_replace(\n                rate(jvm_gc_pause_seconds_count{application=\"rtd-admin\",job=\"rtd-admin\",namespace=\"dev\"}[5m]),\n                \"sitegen_app\",\n                \"rtd-admin-dev\",\n                \"\",\n                \"\"\n              )\n            or\n              label_replace(\n                rate(\n                  jvm_gc_pause_seconds_count{application=\"user-center-application\",job=\"user-center-application\",namespace=\"dev\"}[5m]\n                ),\n                \"sitegen_app\",\n                \"user-center-application-dev\",\n                \"\",\n                \"\"\n              )\n          )\n        )\n      * on (sitegen_app) group_left ()\n        label_replace(vector(1), \"sitegen_app\", \"${jvm_app_selector}\", \"\", \"\")\n    )\n  )\n)",
+              "legendFormat": "GC 次数/秒",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "JVM GC 次数",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "每秒 GC 暂停总时间（秒）。",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "insertNulls": false,
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "unit": "s"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 17
+          },
+          "id": 45,
+          "options": {
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum(\n  (\n    (\n        (\n          (\n              label_replace(\n                rate(jvm_gc_pause_seconds_sum{application=\"rtd-admin\",job=\"rtd-admin\",namespace=\"dev\"}[5m]),\n                \"sitegen_app\",\n                \"rtd-admin-dev\",\n                \"\",\n                \"\"\n              )\n            or\n              label_replace(\n                rate(\n                  jvm_gc_pause_seconds_sum{application=\"user-center-application\",job=\"user-center-application\",namespace=\"dev\"}[5m]\n                ),\n                \"sitegen_app\",\n                \"user-center-application-dev\",\n                \"\",\n                \"\"\n              )\n          )\n        )\n      * on (sitegen_app) group_left ()\n        label_replace(vector(1), \"sitegen_app\", \"${jvm_app_selector}\", \"\", \"\")\n    )\n  )\n)",
+              "legendFormat": "GC 暂停秒/秒",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "JVM GC 暂停时间",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "当前应用 JVM 活跃线程总数。",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "insertNulls": false,
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 25
+          },
+          "id": 46,
+          "options": {
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum(\n  (\n    (\n        (\n          (\n              label_replace(\n                jvm_threads_live_threads{application=\"rtd-admin\",job=\"rtd-admin\",namespace=\"dev\"},\n                \"sitegen_app\",\n                \"rtd-admin-dev\",\n                \"\",\n                \"\"\n              )\n            or\n              label_replace(\n                jvm_threads_live_threads{application=\"user-center-application\",job=\"user-center-application\",namespace=\"dev\"},\n                \"sitegen_app\",\n                \"user-center-application-dev\",\n                \"\",\n                \"\"\n              )\n          )\n        )\n      * on (sitegen_app) group_left ()\n        label_replace(vector(1), \"sitegen_app\", \"${jvm_app_selector}\", \"\", \"\")\n    )\n  )\n)",
+              "legendFormat": "线程数",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "JVM 活跃线程数",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "当前应用 JVM 进程 CPU 使用率。",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "insertNulls": false,
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "line+area"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 0.7
+                  },
+                  {
+                    "color": "red",
+                    "value": 0.9
+                  }
+                ]
+              },
+              "unit": "percentunit"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 25
+          },
+          "id": 47,
+          "options": {
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum(\n  (\n    (\n        (\n          (\n              label_replace(\n                process_cpu_usage{application=\"rtd-admin\",job=\"rtd-admin\",namespace=\"dev\"},\n                \"sitegen_app\",\n                \"rtd-admin-dev\",\n                \"\",\n                \"\"\n              )\n            or\n              label_replace(\n                process_cpu_usage{application=\"user-center-application\",job=\"user-center-application\",namespace=\"dev\"},\n                \"sitegen_app\",\n                \"user-center-application-dev\",\n                \"\",\n                \"\"\n              )\n          )\n        )\n      * on (sitegen_app) group_left ()\n        label_replace(vector(1), \"sitegen_app\", \"${jvm_app_selector}\", \"\", \"\")\n    )\n  )\n)",
+              "legendFormat": "Process CPU",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "JVM 进程 CPU",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "进程运行时长；为 0 或缺失时表示当前应用可能没有可用 JVM 进程数据。",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "red",
+                    "value": null
+                  },
+                  {
+                    "color": "green",
+                    "value": 1
+                  }
+                ]
+              },
+              "unit": "s"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 33
+          },
+          "id": 48,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "area",
+            "justifyMode": "auto",
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "showPercentChange": false,
+            "textMode": "auto",
+            "wideLayout": true
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "max(\n  (\n    (\n        (\n          (\n              label_replace(\n                process_uptime_seconds{application=\"rtd-admin\",job=\"rtd-admin\",namespace=\"dev\"},\n                \"sitegen_app\",\n                \"rtd-admin-dev\",\n                \"\",\n                \"\"\n              )\n            or\n              label_replace(\n                process_uptime_seconds{application=\"user-center-application\",job=\"user-center-application\",namespace=\"dev\"},\n                \"sitegen_app\",\n                \"user-center-application-dev\",\n                \"\",\n                \"\"\n              )\n          )\n        )\n      * on (sitegen_app) group_left ()\n        label_replace(vector(1), \"sitegen_app\", \"${jvm_app_selector}\", \"\", \"\")\n    )\n  )\n)",
+              "instant": true,
+              "range": false,
+              "refId": "A"
+            }
+          ],
+          "title": "JVM 进程运行时长",
+          "type": "stat"
         }
       ],
-      "title": "依赖组件",
+      "title": "JVM 应用运行状态",
       "type": "row"
     },
     {
@@ -1846,9 +3429,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 20
+        "y": 21
       },
-      "id": 32,
+      "id": 49,
       "panels": [
         {
           "datasource": {
@@ -1902,7 +3485,7 @@
             "x": 0,
             "y": 1
           },
-          "id": 33,
+          "id": 50,
           "options": {
             "legend": {
               "calcs": [],
@@ -1983,7 +3566,7 @@
             "x": 12,
             "y": 1
           },
-          "id": 34,
+          "id": 51,
           "options": {
             "legend": {
               "calcs": [],
@@ -2081,7 +3664,7 @@
             "x": 0,
             "y": 9
           },
-          "id": 35,
+          "id": 52,
           "options": {
             "legend": {
               "calcs": [],
@@ -2138,7 +3721,7 @@
             "x": 12,
             "y": 9
           },
-          "id": 36,
+          "id": 53,
           "options": {
             "cellHeight": "sm",
             "footer": {
@@ -2194,7 +3777,7 @@
             "x": 0,
             "y": 17
           },
-          "id": 37,
+          "id": 54,
           "options": {
             "cellHeight": "sm",
             "footer": {
@@ -2223,7 +3806,41 @@
           "type": "table"
         }
       ],
-      "title": "Kubernetes 运行环境",
+      "title": "Kubernetes 运行状态",
+      "type": "row"
+    },
+    {
+      "collapsed": true,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 22
+      },
+      "id": 55,
+      "panels": [
+        {
+          "gridPos": {
+            "h": 6,
+            "w": 12,
+            "x": 0,
+            "y": 1
+          },
+          "id": 56,
+          "options": {
+            "code": {
+              "language": "plaintext",
+              "showLineNumbers": false,
+              "showMiniMap": false
+            },
+            "content": "### 依赖组件专业 Dashboard\n\n- [MySQL Dev](<https://grafana-dev.rtdgo.tech/d/0D6dTg3Zk?var-host=10.10.100.10%3A3306&var-node_host=10.10.100.10>)\n- [Redis Dev](<https://grafana-dev.rtdgo.tech/d/redis-exporter-overview?var-instance=redis%3A%2F%2F10.10.100.10%3A16379>)\n\n组件运行状态见站点健康总览；QPS、连接池、慢查询、内存等详细指标请进入对应专业 Dashboard。",
+            "mode": "markdown"
+          },
+          "title": "依赖组件与下钻",
+          "type": "text"
+        }
+      ],
+      "title": "依赖组件",
       "type": "row"
     }
   ],
@@ -2233,19 +3850,19 @@
     "sitegen",
     "site:admin-dev",
     "environment:dev",
-    "sitegen-template:1.0.0+98da00eefc3bd3ce",
+    "sitegen-template:1.0.0+55d5d9f0e1b0cce4",
     "sitegen-dashboard-template:1881d654dc427ef8"
   ],
   "templating": {
     "list": [
       {
         "current": {
-          "selected": false,
-          "text": "",
-          "value": ""
+          "selected": true,
+          "text": "Prometheus",
+          "value": "prometheus"
         },
         "hide": 0,
-        "label": "数据源",
+        "label": "业务 Prometheus",
         "name": "datasource",
         "query": "prometheus",
         "refresh": 1,
@@ -2297,29 +3914,6 @@
         "valuesFormat": "csv"
       },
       {
-        "allValue": ".*",
-        "current": {
-          "selected": true,
-          "text": "All",
-          "value": "$__all"
-        },
-        "datasource": {
-          "type": "prometheus",
-          "uid": "${datasource}"
-        },
-        "definition": "query_result((\n    (\n      (\n          label_replace(\n            jvm_memory_used_bytes{application=\"rtd-admin\",job=\"rtd-admin\",namespace=\"dev\"},\n            \"sitegen_app\",\n            \"rtd-admin-dev\",\n            \"\",\n            \"\"\n          )\n        or\n          label_replace(\n            jvm_memory_used_bytes{application=\"user-center-application\",job=\"user-center-application\",namespace=\"dev\"},\n            \"sitegen_app\",\n            \"user-center-application-dev\",\n            \"\",\n            \"\"\n          )\n      )\n    )\n  * on (sitegen_app) group_left ()\n    label_replace(vector(1), \"sitegen_app\", \"${jvm_app_selector}\", \"\", \"\")\n))",
-        "hide": 0,
-        "includeAll": true,
-        "label": "Pod（JVM）",
-        "name": "jvm_pod",
-        "query": "query_result((\n    (\n      (\n          label_replace(\n            jvm_memory_used_bytes{application=\"rtd-admin\",job=\"rtd-admin\",namespace=\"dev\"},\n            \"sitegen_app\",\n            \"rtd-admin-dev\",\n            \"\",\n            \"\"\n          )\n        or\n          label_replace(\n            jvm_memory_used_bytes{application=\"user-center-application\",job=\"user-center-application\",namespace=\"dev\"},\n            \"sitegen_app\",\n            \"user-center-application-dev\",\n            \"\",\n            \"\"\n          )\n      )\n    )\n  * on (sitegen_app) group_left ()\n    label_replace(vector(1), \"sitegen_app\", \"${jvm_app_selector}\", \"\", \"\")\n))",
-        "regex": "/pod=\"([^\"]+)\"/",
-        "regexApplyTo": "value",
-        "refresh": 2,
-        "sort": 1,
-        "type": "query"
-      },
-      {
         "current": {
           "selected": true,
           "text": "rtd-admin / dev",
@@ -2355,17 +3949,91 @@
           "type": "prometheus",
           "uid": "${datasource}"
         },
-        "definition": "query_result((\n    (\n      (\n          label_replace(\n            container_memory_working_set_bytes{namespace=\"dev\",pod=~\"^rtd-admin-.*$\"},\n            \"sitegen_app\",\n            \"rtd-admin-dev\",\n            \"\",\n            \"\"\n          )\n        or\n          label_replace(\n            container_memory_working_set_bytes{namespace=\"dev\",pod=~\"^user-center-application-.*$\"},\n            \"sitegen_app\",\n            \"user-center-application-dev\",\n            \"\",\n            \"\"\n          )\n      )\n    )\n  * on (sitegen_app) group_left ()\n    label_replace(vector(1), \"sitegen_app\", \"${k8s_app_selector}\", \"\", \"\")\n))",
+        "definition": "query_result((    (      (          label_replace(            container_memory_working_set_bytes{namespace=\"dev\",pod=~\"^rtd-admin-.*$\"},            \"sitegen_app\",            \"rtd-admin-dev\",            \"\",            \"\"          )        or          label_replace(            container_memory_working_set_bytes{namespace=\"dev\",pod=~\"^user-center-application-.*$\"},            \"sitegen_app\",            \"user-center-application-dev\",            \"\",            \"\"          )      )    )  * on (sitegen_app) group_left ()    label_replace(vector(1), \"sitegen_app\", \"${k8s_app_selector}\", \"\", \"\")))",
         "hide": 0,
         "includeAll": true,
         "label": "Pod（Kubernetes）",
         "name": "k8s_pod",
-        "query": "query_result((\n    (\n      (\n          label_replace(\n            container_memory_working_set_bytes{namespace=\"dev\",pod=~\"^rtd-admin-.*$\"},\n            \"sitegen_app\",\n            \"rtd-admin-dev\",\n            \"\",\n            \"\"\n          )\n        or\n          label_replace(\n            container_memory_working_set_bytes{namespace=\"dev\",pod=~\"^user-center-application-.*$\"},\n            \"sitegen_app\",\n            \"user-center-application-dev\",\n            \"\",\n            \"\"\n          )\n      )\n    )\n  * on (sitegen_app) group_left ()\n    label_replace(vector(1), \"sitegen_app\", \"${k8s_app_selector}\", \"\", \"\")\n))",
+        "query": {
+          "qryType": 3,
+          "query": "query_result((    (      (          label_replace(            container_memory_working_set_bytes{namespace=\"dev\",pod=~\"^rtd-admin-.*$\"},            \"sitegen_app\",            \"rtd-admin-dev\",            \"\",            \"\"          )        or          label_replace(            container_memory_working_set_bytes{namespace=\"dev\",pod=~\"^user-center-application-.*$\"},            \"sitegen_app\",            \"user-center-application-dev\",            \"\",            \"\"          )      )    )  * on (sitegen_app) group_left ()    label_replace(vector(1), \"sitegen_app\", \"${k8s_app_selector}\", \"\", \"\")))",
+          "refId": "PrometheusVariableQueryEditor-VariableQuery"
+        },
         "regex": "/pod=\"([^\"]+)\"/",
         "regexApplyTo": "value",
         "refresh": 2,
         "sort": 1,
         "type": "query"
+      },
+      {
+        "current": {
+          "selected": true,
+          "text": "skywalking",
+          "value": "eg3rhqcz0lvr4d"
+        },
+        "hide": 0,
+        "label": "SkyWalking Prometheus",
+        "name": "skywalking_prometheus",
+        "query": "prometheus",
+        "refresh": 1,
+        "type": "datasource"
+      },
+      {
+        "current": {
+          "selected": true,
+          "text": "apache-skywalking-datasource",
+          "value": "bg3rabysrqps0e"
+        },
+        "hide": 0,
+        "label": "SkyWalking 数据源",
+        "name": "skywalking_datasource",
+        "query": "apache-skywalking-datasource",
+        "refresh": 1,
+        "type": "datasource"
+      },
+      {
+        "current": {
+          "selected": true,
+          "text": "rtd-admin / dev（rtd-admin_dev）",
+          "value": "rtd-admin_dev"
+        },
+        "hide": 0,
+        "label": "APM 服务",
+        "name": "service",
+        "options": [
+          {
+            "selected": true,
+            "text": "rtd-admin / dev（rtd-admin_dev）",
+            "value": "rtd-admin_dev"
+          },
+          {
+            "selected": false,
+            "text": "user-center-application / dev（user-center-application_dev）",
+            "value": "user-center-application_dev"
+          }
+        ],
+        "query": "rtd-admin_dev,user-center-application_dev",
+        "type": "custom",
+        "valuesFormat": "csv"
+      },
+      {
+        "current": {
+          "selected": true,
+          "text": "GENERAL",
+          "value": "GENERAL"
+        },
+        "hide": 2,
+        "name": "layer",
+        "options": [
+          {
+            "selected": true,
+            "text": "GENERAL",
+            "value": "GENERAL"
+          }
+        ],
+        "query": "GENERAL",
+        "type": "custom",
+        "valuesFormat": "csv"
       }
     ]
   },
@@ -2397,7 +4065,7 @@
     ]
   },
   "timezone": "browser",
-  "title": "管理后台站点 · 站点全链路观测",
+  "title": "管理后台站点（https://admin-dev.rtdgo.tech）· 站点全链路观测",
   "uid": "site-admin-dev",
   "version": 1,
   "weekStart": ""

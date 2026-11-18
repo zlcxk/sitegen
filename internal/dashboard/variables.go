@@ -8,8 +8,8 @@ import (
 	"site-observability/internal/metrics"
 )
 
-func buildVariables(site *config.Site, registry *metrics.Registry) ([]Variable, error) {
-	vars := []Variable{datasourceVariable()}
+func buildVariables(site *config.Site, registry *metrics.Registry, datasources config.DatasourcesConfig) ([]Variable, error) {
+	vars := []Variable{datasourceVariable(datasourceVarName, "业务 Prometheus", datasources.BusinessPrometheus)}
 	if len(site.Spec.Applications) == 0 {
 		return vars, nil
 	}
@@ -24,7 +24,8 @@ func buildVariables(site *config.Site, registry *metrics.Registry) ([]Variable, 
 		}
 		selectorVar := metrics.ProfileSelectorVar(profile.ID)
 		vars = append(vars, appSelectorVariable(profile.ID, selectorVar, apps))
-		if profile.ID == "jvm" || profile.ID == "kubernetes" {
+		// JVM is application-scoped and no longer exposes a Pod variable.
+		if profile.ID == "kubernetes" {
 			podVar, err := buildPodVariable(site, profile.ID, selectorVar)
 			if err != nil {
 				return nil, err
@@ -33,6 +34,12 @@ func buildVariables(site *config.Site, registry *metrics.Registry) ([]Variable, 
 				vars = append(vars, *podVar)
 			}
 		}
+	}
+	if siteHasSkywalking(site) {
+		skProm := datasourceVariable(skywalkingPrometheusVarName, "SkyWalking Prometheus", datasources.SkywalkingPrometheus)
+		skNative := datasourceVariable(skywalkingDatasourceVarName, "SkyWalking 数据源", datasources.Skywalking)
+		skNative.Query = "apache-skywalking-datasource"
+		vars = append(vars, skProm, skNative, skywalkingServiceVariable(site), skywalkingLayerVariable())
 	}
 	return vars, nil
 }
@@ -63,16 +70,73 @@ func profileHasPanelVariable(profile *metrics.Profile) bool {
 	return false
 }
 
-func datasourceVariable() Variable {
+func datasourceVariable(name, label string, config config.DatasourceConfig) Variable {
+	current := VariableCurrent{Selected: false, Text: "", Value: ""}
+	if config.UID != "" {
+		text := config.Name
+		if text == "" {
+			text = config.UID
+		}
+		current = VariableCurrent{Selected: true, Text: text, Value: config.UID}
+	}
 	return Variable{
-		Current:   VariableCurrent{Selected: false, Text: "", Value: ""},
+		Current:   current,
 		Hide:      0,
-		Label:     "数据源",
-		Name:      datasourceVarName,
+		Label:     label,
+		Name:      name,
 		Query:     "prometheus",
 		QueryType: VariableQueryTypeDatasource,
 		Refresh:   1,
 		Type:      "datasource",
+	}
+}
+
+func skywalkingServiceVariable(site *config.Site) Variable {
+	var options []VariableOption
+	var values []string
+	for _, app := range site.Spec.Applications {
+		if !app.SkywalkingEnabled() || app.Skywalking.Service == "" {
+			continue
+		}
+		if contains(values, app.Skywalking.Service) {
+			continue
+		}
+		values = append(values, app.Skywalking.Service)
+		options = append(options, VariableOption{
+			Selected: len(options) == 0,
+			Text:     app.Application + " / " + app.Namespace + "（" + app.Skywalking.Service + "）",
+			Value:    app.Skywalking.Service,
+		})
+	}
+	current := VariableCurrent{Selected: false, Text: "", Value: ""}
+	if len(options) > 0 {
+		current = VariableCurrent{Selected: true, Text: options[0].Text, Value: options[0].Value}
+	}
+	return Variable{
+		Current:      current,
+		Hide:         0,
+		Label:        "APM 服务",
+		Multi:        false,
+		Name:         skywalkingServiceVarName,
+		Options:      options,
+		Query:        strings.Join(values, ","),
+		QueryType:    VariableQueryTypeCustom,
+		Type:         "custom",
+		ValuesFormat: "csv",
+	}
+}
+
+func skywalkingLayerVariable() Variable {
+	return Variable{
+		Current:      VariableCurrent{Selected: true, Text: "GENERAL", Value: "GENERAL"},
+		Hide:         2,
+		Multi:        false,
+		Name:         skywalkingLayerVarName,
+		Options:      []VariableOption{{Selected: true, Text: "GENERAL", Value: "GENERAL"}},
+		Query:        "GENERAL",
+		QueryType:    VariableQueryTypeCustom,
+		Type:         "custom",
+		ValuesFormat: "csv",
 	}
 }
 
@@ -133,6 +197,23 @@ func podVariableLabel(profileID string) string {
 	}
 }
 
+// Grafana 11/13 Prometheus variable query types. A plain query string may be
+// interpreted as a Series query and sent to /api/v1/series match[], which
+// fails with `unexpected "("`. The object form makes the type explicit.
+const (
+	promVariableQueryRefID = "PrometheusVariableQueryEditor-VariableQuery"
+	promVarLabelValues     = 1
+	promVarQueryResult     = 3
+)
+
+func promQueryVariable(query string, qryType int) map[string]any {
+	return map[string]any{
+		"qryType": qryType,
+		"query":   query,
+		"refId":   promVariableQueryRefID,
+	}
+}
+
 func buildPodVariable(site *config.Site, profileID, selectorVar string) (*Variable, error) {
 	expression, err := metrics.BuildPodVariableExpression(site, profileID, selectorVar)
 	if err != nil {
@@ -144,7 +225,16 @@ func buildPodVariable(site *config.Site, profileID, selectorVar string) (*Variab
 	// query_result executes arbitrary PromQL and returns the series text. A
 	// regex extracts pod label values. label_values() cannot express the
 	// application identity filter.
+	//
+	// Two Grafana details matter here:
+	//   1. qryType=3 (VarQueryResult) keeps the query on /api/v1/query.
+	//   2. The Prometheus variable parser matches `query_result(...)` with a
+	//      regex that does NOT use the `s` flag, so a multi-line expression is
+	//      treated as a Series query and sent to /api/v1/series match[].
+	//      Remove CR/LF (the editor does the same) while preserving spaces.
 	query := "query_result(" + expression + ")"
+	query = strings.ReplaceAll(query, "\n", "")
+	query = strings.ReplaceAll(query, "\r", "")
 	return &Variable{
 		AllValue:     ".*",
 		Current:      allCurrent(),
@@ -155,7 +245,7 @@ func buildPodVariable(site *config.Site, profileID, selectorVar string) (*Variab
 		Label:        podVariableLabel(profileID),
 		Multi:        false,
 		Name:         metrics.ProfilePodVar(profileID),
-		Query:        query,
+		Query:        promQueryVariable(query, promVarQueryResult),
 		QueryType:    VariableQueryTypeQueryResult,
 		Regex:        `/pod="([^"]+)"/`,
 		RegexApplyTo: "value",

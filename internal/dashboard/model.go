@@ -65,12 +65,18 @@ type Panel struct {
 type Target struct {
 	Datasource   Datasource `json:"datasource"`
 	EditorMode   string     `json:"editorMode,omitempty"`
-	Expr         string     `json:"expr"`
+	Expr         string     `json:"expr,omitempty"`
 	Format       string     `json:"format,omitempty"`
 	Instant      bool       `json:"instant,omitempty"`
 	LegendFormat string     `json:"legendFormat,omitempty"`
 	Range        bool       `json:"range"`
 	RefID        string     `json:"refId"`
+	// SkyWalking native Node Graph fields.
+	Key         string `json:"key,omitempty"`
+	Service     string `json:"service,omitempty"`
+	Layer       string `json:"layer,omitempty"`
+	NodeMetrics string `json:"nodeMetrics,omitempty"`
+	EdgeMetrics string `json:"edgeMetrics,omitempty"`
 }
 
 type PanelLink struct {
@@ -106,6 +112,14 @@ type FieldDefaults struct {
 	Thresholds *ThresholdsConfig `json:"thresholds,omitempty"`
 	Unit       string            `json:"unit,omitempty"`
 	Mappings   []map[string]any  `json:"mappings,omitempty"`
+	Links      []DataLink        `json:"links,omitempty"`
+}
+
+// DataLink is a per-field or per-row dashboard link.
+type DataLink struct {
+	Title       string `json:"title"`
+	URL         string `json:"url"`
+	TargetBlank bool   `json:"targetBlank,omitempty"`
 }
 
 type ThresholdsConfig struct {

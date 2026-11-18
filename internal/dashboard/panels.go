@@ -4,8 +4,44 @@ import (
 	"site-observability/internal/metrics"
 )
 
-func renderPanel(template metrics.Panel, title, query string) Panel {
-	ds := &Datasource{Type: "prometheus", UID: datasourceUID}
+func renderPanel(template metrics.Panel, title, query string, ds *Datasource, dataLinks []DataLink, siteID string) Panel {
+	if ds == nil {
+		ds = &Datasource{Type: "prometheus", UID: datasourceUID}
+	}
+	if template.Panel == "nodeGraph" {
+		// The reference SkyWalking Node Graph uses a literal layer. The layer
+		// variable remains available for Prometheus APM queries; defaulting the
+		// native target to GENERAL avoids depending on interpolation of an
+		// undocumented target field.
+		layer := "GENERAL"
+		if template.NodeGraph != nil && template.NodeGraph.Layer != "" {
+			layer = template.NodeGraph.Layer
+		}
+		return Panel{
+			Datasource:  ds,
+			Description: template.Description,
+			ID:          0,
+			Title:       title,
+			Type:        "nodeGraph",
+			Options: map[string]any{
+				"edges":           map[string]any{},
+				"layoutAlgorithm": "layered",
+				"nodes":           map[string]any{},
+				"zoomMode":        "cooperative",
+			},
+			Targets: []Target{{
+				Datasource:  *ds,
+				EdgeMetrics: template.NodeGraph.EdgeMetrics,
+				Key:         "sitegen-topology-" + siteID,
+				Layer:       layer,
+				NodeMetrics: template.NodeGraph.NodeMetrics,
+				Range:       false,
+				RefID:       "A",
+				Service:     "$service",
+			}},
+		}
+	}
+
 	panel := Panel{
 		Datasource:  ds,
 		Description: template.Description,
@@ -25,7 +61,8 @@ func renderPanel(template metrics.Panel, title, query string) Panel {
 
 	field := FieldConfig{
 		Defaults: FieldDefaults{
-			Unit: template.Unit,
+			Unit:  template.Unit,
+			Links: dataLinks,
 		},
 		Overrides: []any{},
 	}

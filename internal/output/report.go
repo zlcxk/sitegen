@@ -106,6 +106,10 @@ func (r *Report) RootCauses() []string {
 			add("PromQL 执行失败：" + causeTarget(check.Name))
 		case check.Category == "Dashboard 变量" && check.Status == Fail:
 			add("Dashboard 变量查询失败：" + causeTarget(check.Name))
+		case check.Category == "SkyWalking" && check.Status == Warn && strings.Contains(check.Detail, "没有"):
+			add("SkyWalking APM 当前无数据：" + causeTarget(check.Name))
+		case check.Category == "SkyWalking" && strings.Contains(check.Name, "拓扑"):
+			add("SkyWalking 原生拓扑尚未在 Grafana 验证")
 		}
 	}
 	return causes

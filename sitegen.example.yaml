@@ -3,11 +3,31 @@
 #   SITEGEN_PROMETHEUS_USERNAME / SITEGEN_PROMETHEUS_PASSWORD
 #   SITEGEN_PROMETHEUS_TOKEN
 #   SITEGEN_PROMETHEUS_TLS_CA / SITEGEN_PROMETHEUS_TLS_SKIP_VERIFY
+#   SITEGEN_SKYWALKING_PROMETHEUS_USERNAME / PASSWORD / TOKEN
 prometheus:
   url: "http://prometheus.monitoring.svc:9090"
+  # 可选：抓取 SkyWalking OAP 的 Prometheus，用于 APM 数据校验。
+  # 它可以与业务 Prometheus 相同，也可以是独立实例。
+  skywalkingUrl: ""
   timeout: 15s
   tlsCAFile: ""
   tlsInsecureSkipVerify: false
+
+# 三类 Grafana 数据源。UID 留空时，Dashboard 导入后由用户选择；
+# 不要把环境 UID 写进模板。
+datasources:
+  businessPrometheus:
+    uid: ""
+    name: ""
+    type: prometheus
+  skywalkingPrometheus:
+    uid: ""
+    name: ""
+    type: prometheus
+  skywalking:
+    uid: ""
+    name: ""
+    type: apache-skywalking-datasource
 
 links:
   skywalking: "http://skywalking-ui.example.com"
@@ -19,9 +39,34 @@ links:
   skywalkingServiceURLTemplate: "http://skywalking-ui.example.com/service?service={service}"
   skywalkingEndpointURLTemplate: "http://skywalking-ui.example.com/endpoint?service={service}"
 
+  # 可选：SkyWalking 实例 / Endpoint / Trace Dashboard 基础地址。
+  # 支持相对路径 d/<uid>/<slug> 或完整 URL。变量参数由生成器统一编码。
+  skywalkingInstanceDashboard: ""
+  skywalkingEndpointDashboard: ""
+  skywalkingTraceDashboard: ""
+  # 当前 $service 对应的 SkyWalking Service 专业 Dashboard。
+  skywalkingServiceDashboard: ""
+
   # 依赖组件专业 Dashboard UID，按组件类型配置。
   componentDashboards:
     mysql: "mysql-overview"
     redis: "redis-overview"
     kafka: "kafka-overview"
     nacos: "nacos-overview"
+
+  # 各专业 Dashboard 的变量名不同，用参数模板适配。
+  componentDashboardParams:
+    mysql:
+      var-host: "{instance}"
+      var-node_host: "{host}"
+    redis:
+      var-instance: "{instance}"
+    kafka:
+      var-job: "{job}"
+
+  # 可选：额外的专业 Dashboard 导航链接。
+  dashboards: []
+  #  - title: "Kubernetes 集群"
+  #    url: "d/<k8s-dashboard-uid>/k8s-dashboard?var-NameSpace=dev"
+  #  - title: "Blackbox Prober"
+  #    url: "d/<blackbox-dashboard-uid>/blackbox-exporter-http-prober?var-job=blackbox-sites-dev"

@@ -140,6 +140,10 @@
           "type": "object",
           "additionalProperties": false,
           "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "是否生成 SkyWalking APM 面板。未设置时，service 非空即视为启用。"
+            },
             "service": {
               "type": "string",
               "minLength": 1,
@@ -402,6 +406,51 @@
         "skywalkingEndpointURLTemplate": {
           "type": "string",
           "description": "支持 {service}、{application}、{namespace}、{site} 占位符。"
+        },
+        "skywalkingInstanceDashboard": {
+          "type": "string",
+          "description": "SkyWalking 实例 Dashboard 基地址，支持相对路径 d/<uid>/<slug> 或完整 URL。"
+        },
+        "skywalkingEndpointDashboard": {
+          "type": "string",
+          "description": "SkyWalking Endpoint Dashboard 基地址，支持相对路径或完整 URL。"
+        },
+        "skywalkingTraceDashboard": {
+          "type": "string",
+          "description": "Trace 查询 Dashboard 基地址，支持相对路径或完整 URL。"
+        },
+        "skywalkingServiceDashboard": {
+          "type": "string",
+          "description": "SkyWalking Service 专业 Dashboard 基地址；生成器会附加当前 service/layer 和数据源变量。"
+        },
+        "componentDashboardParams": {
+          "type": "object",
+          "description": "按组件类型配置专业 Dashboard 查询参数；值支持 {instance}/{host}/{job}/{component}/{type}。",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        },
+        "dashboards": {
+          "type": "array",
+          "description": "额外的专业 Dashboard 导航链接；URL 支持相对路径 d/<uid>/<slug> 或完整 URL。",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["title", "url"],
+            "properties": {
+              "title": {
+                "type": "string",
+                "minLength": 1
+              },
+              "url": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
         },
         "componentDashboards": {
           "type": "object",

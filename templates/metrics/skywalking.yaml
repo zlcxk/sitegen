@@ -1,0 +1,251 @@
+version: "1.0.0"
+profiles:
+  # Application-level APM from the Prometheus endpoint that scrapes SkyWalking
+  # OAP. The service variable maps Sitegen applications to SkyWalking services.
+  - id: skywalking-apm
+    name: SkyWalking 应用 APM
+    target: application
+    scope: skywalking
+    auto: true
+    datasource: skywalking_prometheus
+    panels:
+      - id: sw-apdex
+        name: 服务 Apdex
+        description: SkyWalking 服务 Apdex。值域 0-1，越高越好。
+        query: |
+          avg(service_apdex{layer="$layer", service="$service"}) / 10000
+        unit: none
+        panel: timeseries
+        legendFormat: Apdex
+        sections: [apm]
+        thresholds:
+          - color: red
+          - color: yellow
+            value: 0.5
+          - color: green
+            value: 0.9
+        requiredMetrics: [service_apdex]
+        requiredLabels: [service, layer]
+
+      - id: sw-sla
+        name: 服务成功率
+        description: SkyWalking 服务 SLA。service_sla 除以 100 后为 0-100 的百分比。
+        query: |
+          avg(service_sla{layer="$layer", service="$service"}) / 100
+        unit: percent
+        panel: timeseries
+        legendFormat: SLA
+        sections: [apm]
+        thresholds:
+          - color: red
+          - color: yellow
+            value: 95
+          - color: green
+            value: 99.5
+        requiredMetrics: [service_sla]
+        requiredLabels: [service, layer]
+
+      - id: sw-cpm
+        name: 服务请求量
+        description: SkyWalking 服务每分钟调用量（CPM）。
+        query: |
+          avg(service_cpm{layer="$layer", service="$service"})
+        unit: calls / min
+        panel: timeseries
+        legendFormat: CPM
+        sections: [apm]
+        requiredMetrics: [service_cpm]
+        requiredLabels: [service, layer]
+
+      - id: sw-resp-time
+        name: 服务平均响应时间
+        description: SkyWalking 服务平均响应时间，单位毫秒。
+        query: |
+          service_resp_time{layer="$layer", service="$service"}
+        unit: ms
+        panel: timeseries
+        legendFormat: "{{service}}"
+        sections: [apm]
+        thresholds:
+          - color: green
+          - color: yellow
+            value: 200
+          - color: red
+            value: 500
+        requiredMetrics: [service_resp_time]
+        requiredLabels: [service, layer]
+
+      - id: sw-percentile
+        name: 服务响应时间分位数
+        description: P50 / P75 / P90 / P95 / P99，单位毫秒。
+        query: |
+          service_percentile{labels="0,1,2,3,4",layer="$layer",relabels="P50,P75,P90,P95,P99",service="$service"}
+        unit: ms
+        panel: timeseries
+        legendFormat: "{{p}}"
+        sections: [apm]
+        requiredMetrics: [service_percentile]
+        requiredLabels: [service, layer]
+
+  # Real service topology from the SkyWalking native datasource. This is a
+  # SkyWalking Node Graph query, not a Prometheus time series.
+  - id: skywalking-topology
+    name: SkyWalking 服务拓扑
+    target: application
+    scope: skywalking
+    auto: true
+    datasource: skywalking_datasource
+    panels:
+      - id: sw-topology
+        name: SkyWalking 服务拓扑
+        description: 使用 SkyWalking 原生数据源查询服务节点和调用边。没有调用数据时 Grafana 会显示空图，不影响其他 Prometheus 面板。
+        panel: nodeGraph
+        datasource: skywalking_datasource
+        sections: [service]
+        nodeGraph:
+          nodeMetrics: '{"name": "service_cpm", "label": "Load", "unit": "cpm"}, { "name": "service_sla", "calculation": "percentage", "label": "Success Rate", "unit": "%" }'
+          edgeMetrics: '{"name": "service_relation_server_resp_time", "label": "Client Latency", "unit": "ms", "type": "SERVER"}, { "name": "service_relation_client_cpm", "label": "Client Load", "unit": "cpm", "type": "CLIENT" }'
+        unit: none
+        requiredMetrics:
+          - service_cpm
+          - service_sla
+          - service_relation_server_resp_time
+          - service_relation_client_cpm
+        requiredLabels: [service]
+
+  # Instance-level APM. The instance name is the original SkyWalking
+  # service_instance label; it is displayed as-is and linked to the configured
+  # instance dashboard.
+  - id: skywalking-instances
+    name: SkyWalking 服务实例
+    target: application
+    scope: skywalking
+    auto: true
+    datasource: skywalking_prometheus
+    panels:
+      - id: sw-instance-load
+        name: 实例请求量 Top 10
+        description: 当前服务实例请求量，按 CPM 降序，Top 10。
+        query: |
+          service_instance_cpm{layer="$layer",order="DES",parent_service="$service",top_n="10"}
+        unit: calls / min
+        panel: bargauge
+        legendFormat: "{{service_instance}}"
+        sections: [instances]
+        linkTargets: [instance]
+        thresholds:
+          - color: green
+          - color: yellow
+            value: 100
+          - color: orange
+            value: 500
+          - color: red
+            value: 1000
+        requiredMetrics: [service_instance_cpm]
+        requiredLabels: [service_instance]
+
+      - id: sw-instance-resp-time
+        name: 实例响应时间 Top 10
+        description: 当前服务实例平均响应时间，单位毫秒。
+        query: |
+          service_instance_resp_time{layer="$layer",order="DES",parent_service="$service",top_n="10"}
+        unit: ms
+        panel: bargauge
+        legendFormat: "{{service_instance}}"
+        sections: [instances]
+        linkTargets: [instance]
+        thresholds:
+          - color: green
+          - color: yellow
+            value: 200
+          - color: red
+            value: 500
+        requiredMetrics: [service_instance_resp_time]
+        requiredLabels: [service_instance]
+
+      - id: sw-instance-sla
+        name: 实例成功率 Top 10
+        description: 当前服务实例成功率，按升序展示最低的实例，便于优先定位异常实例。
+        query: |
+          service_instance_sla{layer="$layer",order="ASC",parent_service="$service",top_n="10"} / 100
+        unit: percent
+        panel: bargauge
+        legendFormat: "{{service_instance}}"
+        sections: [instances]
+        linkTargets: [instance]
+        thresholds:
+          - color: red
+          - color: yellow
+            value: 95
+          - color: green
+            value: 99.5
+        requiredMetrics: [service_instance_sla]
+        requiredLabels: [service_instance]
+
+  # Endpoint-level APM. Endpoint values are displayed exactly as SkyWalking
+  # reports them, e.g. POST:/wc/warehouse/page-list.
+  - id: skywalking-endpoints
+    name: SkyWalking Endpoint
+    target: application
+    scope: skywalking
+    auto: true
+    datasource: skywalking_prometheus
+    panels:
+      - id: sw-endpoint-load
+        name: Endpoint 请求量 Top 10
+        description: 当前服务 Endpoint 请求量，按 CPM 降序，Top 10。
+        query: |
+          endpoint_cpm{layer="$layer",order="DES",parent_service="$service",top_n="10"}
+        unit: calls / min
+        panel: bargauge
+        legendFormat: "{{endpoint}}"
+        sections: [instances]
+        linkTargets: [endpoint, trace]
+        thresholds:
+          - color: green
+          - color: yellow
+            value: 100
+          - color: orange
+            value: 500
+          - color: red
+            value: 1000
+        requiredMetrics: [endpoint_cpm]
+        requiredLabels: [endpoint]
+
+      - id: sw-endpoint-resp-time
+        name: Endpoint 响应时间 Top 10
+        description: 当前服务 Endpoint 平均响应时间，单位毫秒。
+        query: |
+          endpoint_resp_time{layer="$layer",order="DES",parent_service="$service",top_n="10"}
+        unit: ms
+        panel: bargauge
+        legendFormat: "{{endpoint}}"
+        sections: [instances]
+        linkTargets: [endpoint, trace]
+        thresholds:
+          - color: green
+          - color: yellow
+            value: 200
+          - color: red
+            value: 500
+        requiredMetrics: [endpoint_resp_time]
+        requiredLabels: [endpoint]
+
+      - id: sw-endpoint-sla
+        name: Endpoint 成功率 Top 10
+        description: 当前服务 Endpoint 成功率，按升序展示最低的 Endpoint。
+        query: |
+          endpoint_sla{layer="$layer",order="ASC",parent_service="$service",top_n="10"} / 100
+        unit: percent
+        panel: bargauge
+        legendFormat: "{{endpoint}}"
+        sections: [instances]
+        linkTargets: [endpoint, trace]
+        thresholds:
+          - color: red
+          - color: yellow
+            value: 95
+          - color: green
+            value: 99.5
+        requiredMetrics: [endpoint_sla]
+        requiredLabels: [endpoint]
